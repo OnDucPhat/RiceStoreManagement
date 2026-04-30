@@ -1,0 +1,29 @@
+# Maven
+/target/
+*.log
+
+# IDEs
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.classpath
+.project
+.settings/
+bin/
+out/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Env / secrets
+.env
+.env.*
+*.pem
+*.key
+*.p12
+secrets/
+application-local.properties
+application-secrets.properties
