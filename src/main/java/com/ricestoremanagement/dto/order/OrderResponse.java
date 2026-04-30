@@ -1,54 +1,48 @@
-package com.ricestoremanagement.model;
+package com.ricestoremanagement.dto.order;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
+import com.ricestoremanagement.model.Order;
 import com.ricestoremanagement.model.enums.OrderSource;
 import com.ricestoremanagement.model.enums.OrderStatus;
-import jakarta.persistence.Column;
-import jakarta.persistence.Entity;
-import jakarta.persistence.EnumType;
-import jakarta.persistence.Enumerated;
-import jakarta.persistence.FetchType;
-import jakarta.persistence.GeneratedValue;
-import jakarta.persistence.GenerationType;
-import jakarta.persistence.Id;
-import jakarta.persistence.JoinColumn;
-import jakarta.persistence.Lob;
-import jakarta.persistence.ManyToOne;
-import jakarta.persistence.Table;
 import java.math.BigDecimal;
 
-@Entity
-@Table(name = "orders")
-public class Order {
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
+public class OrderResponse {
     private Long id;
 
-    @Column(name = "customer_name", nullable = false, length = 200)
+    @JsonProperty("customer_name")
     private String customerName;
 
-    @Column(nullable = false, length = 500)
     private String address;
 
-    @Lob
-    @Column(name = "product_details", nullable = false)
+    @JsonProperty("product_details")
     private String productDetails;
 
-    @Column(name = "total_price", nullable = false, precision = 12, scale = 2)
+    @JsonProperty("total_price")
     private BigDecimal totalPrice;
 
-    @Enumerated(EnumType.STRING)
-    @Column(nullable = false, length = 32)
     private OrderSource source;
 
-    @Enumerated(EnumType.STRING)
-    @Column(nullable = false, length = 64)
     private OrderStatus status;
 
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "shipper_id")
-    private User shipper;
+    @JsonProperty("shipper_id")
+    private Long shipperId;
 
-    public Order() {
+    public OrderResponse() {
+    }
+
+    public static OrderResponse from(Order order) {
+        OrderResponse response = new OrderResponse();
+        response.setId(order.getId());
+        response.setCustomerName(order.getCustomerName());
+        response.setAddress(order.getAddress());
+        response.setProductDetails(order.getProductDetails());
+        response.setTotalPrice(order.getTotalPrice());
+        response.setSource(order.getSource());
+        response.setStatus(order.getStatus());
+        if (order.getShipper() != null) {
+            response.setShipperId(order.getShipper().getId());
+        }
+        return response;
     }
 
     public Long getId() {
@@ -107,11 +101,11 @@ public class Order {
         this.status = status;
     }
 
-    public User getShipper() {
-        return shipper;
+    public Long getShipperId() {
+        return shipperId;
     }
 
-    public void setShipper(User shipper) {
-        this.shipper = shipper;
+    public void setShipperId(Long shipperId) {
+        this.shipperId = shipperId;
     }
 }
