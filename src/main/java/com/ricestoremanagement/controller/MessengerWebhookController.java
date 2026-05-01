@@ -2,6 +2,7 @@ package com.ricestoremanagement.controller;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.ricestoremanagement.dto.ai.AiChatbotResult;
 import com.ricestoremanagement.dto.ai.AiParsedOrder;
 import com.ricestoremanagement.dto.messenger.WebhookEntry;
 import com.ricestoremanagement.dto.messenger.WebhookMessaging;
@@ -92,15 +93,28 @@ public class MessengerWebhookController {
             return;
         }
 
-        Optional<AiParsedOrder> parsedOpt = aiParsingService.parseOrder(text);
-        if (parsedOpt.isEmpty() || !parsedOpt.get().isComplete()) {
-            messengerGraphApiService.sendTextMessage(
-                    senderId,
-                    "Please provide rice type, quantity, and delivery address.");
+        Optional<AiChatbotResult> resultOpt = aiParsingService.chat(text);
+        if (resultOpt.isEmpty()) {
+            messengerGraphApiService.sendTextMessage(senderId, fallbackReply());
             return;
         }
 
-        AiParsedOrder parsed = parsedOpt.get();
+        AiChatbotResult result = resultOpt.get();
+        if (!result.isOrderIntent()) {
+            messengerGraphApiService.sendTextMessage(
+                    senderId,
+                    result.replyOrDefault(fallbackReply()));
+            return;
+        }
+
+        if (!result.isCompleteOrder()) {
+            messengerGraphApiService.sendTextMessage(
+                    senderId,
+                    result.replyOrDefault("Bạn cho mình xin thêm loại gạo, số lượng và địa chỉ giao hàng nhé."));
+            return;
+        }
+
+        AiParsedOrder parsed = toParsedOrder(result);
         Order order = new Order();
         order.setCustomerName("Messenger:" + senderId);
         order.setAddress(parsed.getAddress());
@@ -113,7 +127,7 @@ public class MessengerWebhookController {
 
         messengerGraphApiService.sendTextMessage(
                 senderId,
-                buildConfirmationMessage(parsed));
+                result.replyOrDefault(buildConfirmationMessage(parsed)));
 
         log.info("Created Messenger order from sender {}", senderId);
     }
@@ -123,6 +137,7 @@ public class MessengerWebhookController {
         details.put("rice_type", parsed.getRiceType());
         details.put("quantity", parsed.getQuantity());
         details.put("address", parsed.getAddress());
+        details.put("customer_phone", parsed.getCustomerPhone());
         details.put("raw_message", rawText);
 
         try {
@@ -135,9 +150,22 @@ public class MessengerWebhookController {
 
     private String buildConfirmationMessage(AiParsedOrder parsed) {
         return String.format(
-                "Thanks! We received your order: %s, quantity %s, deliver to %s.",
+                "Mình đã ghi nhận đơn %s, số lượng %s, giao đến %s. Cửa hàng sẽ xử lý sớm nhé.",
                 parsed.getRiceType(),
                 parsed.getQuantity(),
                 parsed.getAddress());
+    }
+
+    private AiParsedOrder toParsedOrder(AiChatbotResult result) {
+        AiParsedOrder parsed = new AiParsedOrder();
+        parsed.setRiceType(result.getRiceType());
+        parsed.setQuantity(result.getQuantity());
+        parsed.setAddress(result.getAddress());
+        parsed.setCustomerPhone(result.getCustomerPhone());
+        return parsed;
+    }
+
+    private String fallbackReply() {
+        return "Mình là trợ lý của cửa hàng gạo. Bạn có thể hỏi về gạo hoặc nhắn đơn hàng, ví dụ: 2kg ST25 giao tới Quận 10.";
     }
 }

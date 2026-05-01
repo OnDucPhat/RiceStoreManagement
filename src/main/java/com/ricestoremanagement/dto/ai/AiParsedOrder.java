@@ -7,6 +7,8 @@ public class AiParsedOrder {
     private String riceType;
     private String quantity;
     private String address;
+    @JsonProperty("customer_phone")
+    private String customerPhone;
 
     public AiParsedOrder() {
     }
@@ -33,6 +35,14 @@ public class AiParsedOrder {
 
     public void setAddress(String address) {
         this.address = address;
+    }
+
+    public String getCustomerPhone() {
+        return customerPhone;
+    }
+
+    public void setCustomerPhone(String customerPhone) {
+        this.customerPhone = customerPhone;
     }
 
     public boolean isComplete() {

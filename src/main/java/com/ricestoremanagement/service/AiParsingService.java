@@ -16,11 +16,24 @@ import org.springframework.web.client.RestClientException;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.ricestoremanagement.dto.ai.AiChatbotResult;
 import com.ricestoremanagement.dto.ai.AiParsedOrder;
 
 @Service
 public class AiParsingService {
     private static final Logger log = LoggerFactory.getLogger(AiParsingService.class);
+    private static final String DEFAULT_CHATBOT_PROMPT = """
+            You are a friendly Vietnamese AI assistant for a rice store.
+            Classify each customer message and return only JSON with these keys:
+            intent, rice_type, quantity, address, customer_phone, reply.
+            intent must be ORDER_CREATE when the user wants to buy/order rice.
+            intent must be GENERAL_CHAT for greetings, questions, and non-order conversation.
+            Use empty strings for missing order fields.
+            If ORDER_CREATE is missing rice_type, quantity, or address, reply in natural Vietnamese asking only for the missing information.
+            If ORDER_CREATE is complete, reply in natural Vietnamese confirming the order details.
+            If GENERAL_CHAT, reply as a helpful rice store assistant in Vietnamese.
+            Keep reply concise, warm, and practical.
+            """;
 
     private final RestClient openAiClient;
     private final RestClient geminiClient;
@@ -54,20 +67,24 @@ public class AiParsingService {
         this.geminiClient = RestClient.builder().baseUrl(geminiBaseUrl).build();
     }
 
-    public Optional<AiParsedOrder> parseOrder(String messageText) {
+    public Optional<AiChatbotResult> chat(String messageText) {
         if (messageText == null || messageText.trim().isEmpty()) {
             return Optional.empty();
         }
         if ("gemini".equalsIgnoreCase(provider)) {
-            return parseWithGemini(messageText);
+            return chatWithGemini(messageText);
         }
         if (!"openai".equalsIgnoreCase(provider)) {
             log.warn("Unknown ai.provider value '{}'; falling back to OpenAI", provider);
         }
-        return parseWithOpenAi(messageText);
+        return chatWithOpenAi(messageText);
     }
 
-    private Optional<AiParsedOrder> parseWithOpenAi(String messageText) {
+    public Optional<AiParsedOrder> parseOrder(String messageText) {
+        return chat(messageText).map(this::toParsedOrder);
+    }
+
+    private Optional<AiChatbotResult> chatWithOpenAi(String messageText) {
         if (openAiKey == null || openAiKey.trim().isEmpty()) {
             log.warn("OpenAI key not configured; skipping AI parsing");
             return Optional.empty();
@@ -100,7 +117,7 @@ public class AiParsingService {
         }
     }
 
-    private Optional<AiParsedOrder> parseWithGemini(String messageText) {
+    private Optional<AiChatbotResult> chatWithGemini(String messageText) {
         if (geminiKey == null || geminiKey.trim().isEmpty()) {
             log.warn("Gemini key not configured; skipping AI parsing");
             return Optional.empty();
@@ -140,7 +157,7 @@ public class AiParsingService {
 
     private AiChatCompletionRequest buildOpenAiRequest(String messageText) {
         List<AiChatMessage> messages = new ArrayList<>();
-        messages.add(new AiChatMessage("system", systemPrompt));
+        messages.add(new AiChatMessage("system", chatbotPrompt()));
         messages.add(new AiChatMessage("user", messageText));
 
         AiChatCompletionRequest request = new AiChatCompletionRequest();
@@ -155,7 +172,7 @@ public class AiParsingService {
         GeminiGenerateRequest request = new GeminiGenerateRequest();
 
         GeminiContent systemInstruction = new GeminiContent(null,
-                List.of(new GeminiPart(systemPrompt)));
+                List.of(new GeminiPart(chatbotPrompt())));
         GeminiContent userContent = new GeminiContent("user",
                 List.of(new GeminiPart(messageText)));
 
@@ -165,19 +182,35 @@ public class AiParsingService {
         return request;
     }
 
-    private Optional<AiParsedOrder> parseJson(String content) {
+    private Optional<AiChatbotResult> parseJson(String content) {
         if (content == null || content.trim().isEmpty()) {
             return Optional.empty();
         }
 
         String json = extractJsonObject(content);
         try {
-            AiParsedOrder parsed = objectMapper.readValue(json, AiParsedOrder.class);
-            return Optional.of(parsed);
+            AiChatbotResult result = objectMapper.readValue(json, AiChatbotResult.class);
+            return Optional.of(result);
         } catch (Exception ex) {
             log.warn("Unable to parse AI response: {}", ex.getMessage());
             return Optional.empty();
         }
+    }
+
+    private String chatbotPrompt() {
+        if (systemPrompt == null || systemPrompt.trim().isEmpty()
+                || !systemPrompt.contains("intent")) {
+            return DEFAULT_CHATBOT_PROMPT;
+        }
+        return systemPrompt;
+    }
+
+    private AiParsedOrder toParsedOrder(AiChatbotResult result) {
+        AiParsedOrder parsed = new AiParsedOrder();
+        parsed.setRiceType(result.getRiceType());
+        parsed.setQuantity(result.getQuantity());
+        parsed.setAddress(result.getAddress());
+        return parsed;
     }
 
     private String extractJsonObject(String content) {
