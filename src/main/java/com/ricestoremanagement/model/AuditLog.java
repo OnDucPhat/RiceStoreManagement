@@ -27,6 +27,10 @@ public class AuditLog {
     @JoinColumn(name = "user_id", nullable = false)
     private User user;
 
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "target_order_id", nullable = false)
+    private Order targetOrder;
+
     @Lob
     @Column(nullable = false)
     private String description;
@@ -66,6 +70,14 @@ public class AuditLog {
 
     public void setUser(User user) {
         this.user = user;
+    }
+
+    public Order getTargetOrder() {
+        return targetOrder;
+    }
+
+    public void setTargetOrder(Order targetOrder) {
+        this.targetOrder = targetOrder;
     }
 
     public String getDescription() {
