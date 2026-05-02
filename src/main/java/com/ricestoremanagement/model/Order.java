@@ -26,6 +26,9 @@ public class Order {
     @Column(name = "customer_name", nullable = false, length = 200)
     private String customerName;
 
+    @Column(name = "customer_phone", nullable = false, length = 32)
+    private String customerPhone;
+
     @Column(nullable = false, length = 500)
     private String address;
 
@@ -65,6 +68,14 @@ public class Order {
 
     public void setCustomerName(String customerName) {
         this.customerName = customerName;
+    }
+
+    public String getCustomerPhone() {
+        return customerPhone;
+    }
+
+    public void setCustomerPhone(String customerPhone) {
+        this.customerPhone = customerPhone;
     }
 
     public String getAddress() {

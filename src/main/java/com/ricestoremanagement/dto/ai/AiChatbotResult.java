@@ -26,7 +26,10 @@ public class AiChatbotResult {
     }
 
     public boolean isCompleteOrder() {
-        return isNotBlank(riceType) && isNotBlank(quantity) && isNotBlank(address);
+        return isNotBlank(riceType)
+                && isNotBlank(quantity)
+                && isNotBlank(address)
+                && isNotBlank(customerPhone);
     }
 
     public String replyOrDefault(String fallback) {

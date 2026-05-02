@@ -36,7 +36,7 @@ public class AiParsingService {
             intent must be ORDER_CREATE when the user wants to buy/order rice.
             intent must be GENERAL_CHAT for greetings, questions, and non-order conversation.
             Use empty strings for missing order fields.
-            If ORDER_CREATE is missing rice_type, quantity, or address, reply in natural Vietnamese asking only for the missing information.
+            If ORDER_CREATE is missing rice_type, quantity, address, or customer_phone, reply in natural Vietnamese asking only for the missing information.
             If ORDER_CREATE is complete, reply in natural Vietnamese confirming the order details.
             If GENERAL_CHAT, reply as a helpful rice store assistant in Vietnamese.
             When recommending rice, use only the provided rice catalog. Mention prices from the catalog when useful.
@@ -337,6 +337,7 @@ public class AiParsingService {
         parsed.setRiceType(result.getRiceType());
         parsed.setQuantity(result.getQuantity());
         parsed.setAddress(result.getAddress());
+        parsed.setCustomerPhone(result.getCustomerPhone());
         return parsed;
     }
 

@@ -182,6 +182,7 @@ public class MessengerWebhookController {
         AiParsedOrder parsed = draft.toParsedOrder();
         Order order = new Order();
         order.setCustomerName("Messenger:" + senderId);
+        order.setCustomerPhone(parsed.getCustomerPhone());
         order.setAddress(parsed.getAddress());
         order.setProductDetails(buildProductDetailsJson(parsed, draft.rawText()));
         order.setTotalPrice(BigDecimal.ZERO);
@@ -220,10 +221,11 @@ public class MessengerWebhookController {
 
     private String buildConfirmationMessage(AiParsedOrder parsed) {
         return String.format(
-                "Minh da ghi nhan don %s, so luong %s, giao den %s. Cua hang se xu ly som nhe.",
+                "Minh da ghi nhan don %s, so luong %s, giao den %s. SDT lien he: %s. Cua hang se xu ly som nhe.",
                 parsed.getRiceType(),
                 parsed.getQuantity(),
-                parsed.getAddress());
+                parsed.getAddress(),
+                parsed.getCustomerPhone());
     }
 
     private String fallbackReply() {
@@ -289,6 +291,9 @@ public class MessengerWebhookController {
         }
         if (!isNotBlank(draft.address)) {
             missingFields.add("dia chi giao hang");
+        }
+        if (!isNotBlank(draft.customerPhone)) {
+            missingFields.add("so dien thoai");
         }
         return "Minh da ghi nhan thong tin hien co. Ban cho minh xin them "
                 + joinVietnamese(missingFields)
@@ -362,7 +367,10 @@ public class MessengerWebhookController {
         }
 
         private boolean isComplete() {
-            return isNotBlank(riceType) && isNotBlank(quantity) && isNotBlank(address);
+            return isNotBlank(riceType)
+                    && isNotBlank(quantity)
+                    && isNotBlank(address)
+                    && isNotBlank(customerPhone);
         }
 
         private boolean isExpired(long now) {

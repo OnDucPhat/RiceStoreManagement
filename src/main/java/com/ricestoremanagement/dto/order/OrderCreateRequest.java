@@ -13,6 +13,11 @@ public class OrderCreateRequest {
     @Size(max = 200)
     private String customerName;
 
+    @JsonProperty("customer_phone")
+    @NotBlank
+    @Size(max = 32)
+    private String customerPhone;
+
     @NotBlank
     @Size(max = 500)
     private String address;
@@ -35,6 +40,14 @@ public class OrderCreateRequest {
 
     public void setCustomerName(String customerName) {
         this.customerName = customerName;
+    }
+
+    public String getCustomerPhone() {
+        return customerPhone;
+    }
+
+    public void setCustomerPhone(String customerPhone) {
+        this.customerPhone = customerPhone;
     }
 
     public String getAddress() {

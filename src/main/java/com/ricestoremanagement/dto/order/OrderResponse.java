@@ -12,6 +12,9 @@ public class OrderResponse {
     @JsonProperty("customer_name")
     private String customerName;
 
+    @JsonProperty("customer_phone")
+    private String customerPhone;
+
     private String address;
 
     @JsonProperty("product_details")
@@ -34,6 +37,7 @@ public class OrderResponse {
         OrderResponse response = new OrderResponse();
         response.setId(order.getId());
         response.setCustomerName(order.getCustomerName());
+        response.setCustomerPhone(order.getCustomerPhone());
         response.setAddress(order.getAddress());
         response.setProductDetails(order.getProductDetails());
         response.setTotalPrice(order.getTotalPrice());
@@ -59,6 +63,14 @@ public class OrderResponse {
 
     public void setCustomerName(String customerName) {
         this.customerName = customerName;
+    }
+
+    public String getCustomerPhone() {
+        return customerPhone;
+    }
+
+    public void setCustomerPhone(String customerPhone) {
+        this.customerPhone = customerPhone;
     }
 
     public String getAddress() {

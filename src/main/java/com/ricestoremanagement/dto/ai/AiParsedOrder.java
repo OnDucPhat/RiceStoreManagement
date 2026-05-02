@@ -46,7 +46,10 @@ public class AiParsedOrder {
     }
 
     public boolean isComplete() {
-        return isNotBlank(riceType) && isNotBlank(quantity) && isNotBlank(address);
+        return isNotBlank(riceType)
+                && isNotBlank(quantity)
+                && isNotBlank(address)
+                && isNotBlank(customerPhone);
     }
 
     private boolean isNotBlank(String value) {

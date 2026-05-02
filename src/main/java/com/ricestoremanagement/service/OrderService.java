@@ -27,6 +27,7 @@ public class OrderService {
     public Order createManualOrder(OrderCreateRequest request) {
         Order order = new Order();
         order.setCustomerName(request.getCustomerName().trim());
+        order.setCustomerPhone(request.getCustomerPhone().trim());
         order.setAddress(request.getAddress().trim());
         order.setProductDetails(request.getProductDetails().trim());
         order.setTotalPrice(request.getTotalPrice());
