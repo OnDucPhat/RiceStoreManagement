@@ -5,7 +5,6 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
-import jakarta.persistence.Lob;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
@@ -22,8 +21,7 @@ public class RiceProduct {
     @Column(nullable = false, unique = true, length = 150)
     private String name;
 
-    @Lob
-    @Column(nullable = false)
+    @Column(nullable = false, length = 1000)
     private String characteristics;
 
     @Column(name = "price_per_kg", nullable = false, precision = 12, scale = 2)

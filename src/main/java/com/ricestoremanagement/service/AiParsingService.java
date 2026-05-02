@@ -1,8 +1,11 @@
 package com.ricestoremanagement.service;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -10,6 +13,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
@@ -18,6 +22,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ricestoremanagement.dto.ai.AiChatbotResult;
 import com.ricestoremanagement.dto.ai.AiParsedOrder;
+import com.ricestoremanagement.model.RiceProduct;
 
 @Service
 public class AiParsingService {
@@ -32,6 +37,7 @@ public class AiParsingService {
             If ORDER_CREATE is missing rice_type, quantity, or address, reply in natural Vietnamese asking only for the missing information.
             If ORDER_CREATE is complete, reply in natural Vietnamese confirming the order details.
             If GENERAL_CHAT, reply as a helpful rice store assistant in Vietnamese.
+            When recommending rice, use only the provided rice catalog. Mention prices from the catalog when useful.
             Keep reply concise, warm, and practical.
             """;
 
@@ -68,38 +74,36 @@ public class AiParsingService {
     }
 
     public Optional<AiChatbotResult> chat(String messageText) {
+        return chat(messageText, List.of());
+    }
+
+    public Optional<AiChatbotResult> chat(String messageText, List<RiceProduct> riceCatalog) {
         if (messageText == null || messageText.trim().isEmpty()) {
             return Optional.empty();
         }
         if ("gemini".equalsIgnoreCase(provider)) {
-            return chatWithGemini(messageText);
+            return chatWithGemini(messageText, riceCatalog);
         }
         if (!"openai".equalsIgnoreCase(provider)) {
             log.warn("Unknown ai.provider value '{}'; falling back to OpenAI", provider);
         }
-        return chatWithOpenAi(messageText);
+        return chatWithOpenAi(messageText, riceCatalog);
     }
 
     public Optional<AiParsedOrder> parseOrder(String messageText) {
         return chat(messageText).map(this::toParsedOrder);
     }
 
-    private Optional<AiChatbotResult> chatWithOpenAi(String messageText) {
+    private Optional<AiChatbotResult> chatWithOpenAi(String messageText, List<RiceProduct> riceCatalog) {
         if (openAiKey == null || openAiKey.trim().isEmpty()) {
             log.warn("OpenAI key not configured; skipping AI parsing");
             return Optional.empty();
         }
 
-        AiChatCompletionRequest request = buildOpenAiRequest(messageText);
+        Map<String, Object> request = buildOpenAiRequest(messageText, riceCatalog);
 
         try {
-            AiChatCompletionResponse response = openAiClient.post()
-                    .uri("/chat/completions")
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .header(HttpHeaders.AUTHORIZATION, "Bearer " + openAiKey)
-                    .body(request)
-                    .retrieve()
-                    .body(AiChatCompletionResponse.class);
+            AiChatCompletionResponse response = sendOpenAiRequest(request);
 
             if (response == null || response.getChoices() == null || response.getChoices().isEmpty()) {
                 return Optional.empty();
@@ -111,19 +115,21 @@ public class AiParsingService {
             }
             String content = choice.getMessage().getContent();
             return parseJson(content);
+        } catch (HttpClientErrorException ex) {
+            return handleOpenAiHttpError(request, ex);
         } catch (RestClientException ex) {
             log.warn("OpenAI parsing request failed: {}", ex.getMessage());
             return Optional.empty();
         }
     }
 
-    private Optional<AiChatbotResult> chatWithGemini(String messageText) {
+    private Optional<AiChatbotResult> chatWithGemini(String messageText, List<RiceProduct> riceCatalog) {
         if (geminiKey == null || geminiKey.trim().isEmpty()) {
             log.warn("Gemini key not configured; skipping AI parsing");
             return Optional.empty();
         }
 
-        GeminiGenerateRequest request = buildGeminiRequest(messageText);
+        GeminiGenerateRequest request = buildGeminiRequest(messageText, riceCatalog);
 
         try {
             GeminiGenerateResponse response = geminiClient.post()
@@ -155,24 +161,60 @@ public class AiParsingService {
         }
     }
 
-    private AiChatCompletionRequest buildOpenAiRequest(String messageText) {
-        List<AiChatMessage> messages = new ArrayList<>();
-        messages.add(new AiChatMessage("system", chatbotPrompt()));
-        messages.add(new AiChatMessage("user", messageText));
+    private Map<String, Object> buildOpenAiRequest(String messageText, List<RiceProduct> riceCatalog) {
+        List<Map<String, String>> messages = new ArrayList<>();
+        messages.add(Map.of("role", "system", "content", chatbotPrompt(riceCatalog)));
+        messages.add(Map.of("role", "user", "content", messageText));
 
-        AiChatCompletionRequest request = new AiChatCompletionRequest();
-        request.setModel(openAiModel);
-        request.setMessages(messages);
-        request.setTemperature(0.2);
-        request.setResponseFormat(new AiResponseFormat("json_object"));
+        Map<String, Object> request = new LinkedHashMap<>();
+        request.put("model", openAiModel);
+        request.put("messages", messages);
+        request.put("temperature", 0.2);
+        request.put("response_format", Map.of("type", "json_object"));
         return request;
     }
 
-    private GeminiGenerateRequest buildGeminiRequest(String messageText) {
+    private AiChatCompletionResponse sendOpenAiRequest(Map<String, Object> request) {
+        return openAiClient.post()
+                .uri("/chat/completions")
+                .contentType(MediaType.APPLICATION_JSON)
+                .accept(MediaType.APPLICATION_JSON)
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + openAiKey)
+                .body(request)
+                .retrieve()
+                .body(AiChatCompletionResponse.class);
+    }
+
+    private Optional<AiChatbotResult> handleOpenAiHttpError(
+            Map<String, Object> request,
+            HttpClientErrorException ex) {
+        if (ex.getStatusCode().value() == 400 && request.containsKey("response_format")) {
+            try {
+                Map<String, Object> retryRequest = new LinkedHashMap<>(request);
+                retryRequest.remove("response_format");
+                AiChatCompletionResponse response = sendOpenAiRequest(retryRequest);
+                if (response == null || response.getChoices() == null || response.getChoices().isEmpty()) {
+                    return Optional.empty();
+                }
+                AiChatCompletionChoice choice = response.getChoices().get(0);
+                if (choice == null || choice.getMessage() == null) {
+                    return Optional.empty();
+                }
+                return parseJson(choice.getMessage().getContent());
+            } catch (RestClientException retryEx) {
+                log.warn("OpenAI parsing retry failed: {}", retryEx.getMessage());
+            }
+        }
+
+        log.warn("OpenAI parsing request failed: {} {}", ex.getStatusCode(), ex.getResponseBodyAsString());
+        return Optional.empty();
+    }
+
+    private GeminiGenerateRequest buildGeminiRequest(String messageText, List<RiceProduct> riceCatalog) {
         GeminiGenerateRequest request = new GeminiGenerateRequest();
 
         GeminiContent systemInstruction = new GeminiContent(null,
-                List.of(new GeminiPart(chatbotPrompt())));
+                List.of(new GeminiPart(chatbotPrompt(riceCatalog))));
         GeminiContent userContent = new GeminiContent("user",
                 List.of(new GeminiPart(messageText)));
 
@@ -197,12 +239,32 @@ public class AiParsingService {
         }
     }
 
-    private String chatbotPrompt() {
+    private String chatbotPrompt(List<RiceProduct> riceCatalog) {
+        String basePrompt;
         if (systemPrompt == null || systemPrompt.trim().isEmpty()
                 || !systemPrompt.contains("intent")) {
-            return DEFAULT_CHATBOT_PROMPT;
+            basePrompt = DEFAULT_CHATBOT_PROMPT;
+        } else {
+            basePrompt = systemPrompt;
         }
-        return systemPrompt;
+
+        String catalog = buildCatalogPrompt(riceCatalog);
+        if (catalog.isEmpty()) {
+            return basePrompt;
+        }
+        return basePrompt + "\n\nRice catalog:\n" + catalog;
+    }
+
+    private String buildCatalogPrompt(List<RiceProduct> riceCatalog) {
+        if (riceCatalog == null || riceCatalog.isEmpty()) {
+            return "";
+        }
+        return riceCatalog.stream()
+                .map(product -> "- " + product.getName()
+                        + ": price_per_kg=" + product.getPricePerKg()
+                        + ", profit_per_kg=" + product.getProfitPerKg()
+                        + ", characteristics=" + product.getCharacteristics())
+                .collect(Collectors.joining("\n"));
     }
 
     private AiParsedOrder toParsedOrder(AiChatbotResult result) {

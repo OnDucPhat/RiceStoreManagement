@@ -1,5 +1,22 @@
 package com.ricestoremanagement.controller;
 
+import java.math.BigDecimal;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.Optional;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
+
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ricestoremanagement.dto.ai.AiChatbotResult;
@@ -13,21 +30,7 @@ import com.ricestoremanagement.model.enums.OrderStatus;
 import com.ricestoremanagement.repository.OrderRepository;
 import com.ricestoremanagement.service.AiParsingService;
 import com.ricestoremanagement.service.MessengerGraphApiService;
-import java.math.BigDecimal;
-import java.util.LinkedHashMap;
-import java.util.Map;
-import java.util.Optional;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
-import org.springframework.web.bind.annotation.RestController;
+import com.ricestoremanagement.service.RiceProductService;
 
 @RestController
 @RequestMapping("/webhook")
@@ -38,6 +41,7 @@ public class MessengerWebhookController {
     private final AiParsingService aiParsingService;
     private final OrderRepository orderRepository;
     private final MessengerGraphApiService messengerGraphApiService;
+    private final RiceProductService riceProductService;
     private final ObjectMapper objectMapper;
 
     public MessengerWebhookController(
@@ -45,11 +49,13 @@ public class MessengerWebhookController {
             AiParsingService aiParsingService,
             OrderRepository orderRepository,
             MessengerGraphApiService messengerGraphApiService,
+            RiceProductService riceProductService,
             ObjectMapper objectMapper) {
         this.verifyToken = verifyToken;
         this.aiParsingService = aiParsingService;
         this.orderRepository = orderRepository;
         this.messengerGraphApiService = messengerGraphApiService;
+        this.riceProductService = riceProductService;
         this.objectMapper = objectMapper;
     }
 
@@ -93,7 +99,7 @@ public class MessengerWebhookController {
             return;
         }
 
-        Optional<AiChatbotResult> resultOpt = aiParsingService.chat(text);
+        Optional<AiChatbotResult> resultOpt = aiParsingService.chat(text, riceProductService.getProducts(true));
         if (resultOpt.isEmpty()) {
             messengerGraphApiService.sendTextMessage(senderId, fallbackReply());
             return;
@@ -110,7 +116,7 @@ public class MessengerWebhookController {
         if (!result.isCompleteOrder()) {
             messengerGraphApiService.sendTextMessage(
                     senderId,
-                    result.replyOrDefault("Bạn cho mình xin thêm loại gạo, số lượng và địa chỉ giao hàng nhé."));
+                    result.replyOrDefault("Ban cho minh xin them loai gao, so luong va dia chi giao hang nhe."));
             return;
         }
 
@@ -150,7 +156,7 @@ public class MessengerWebhookController {
 
     private String buildConfirmationMessage(AiParsedOrder parsed) {
         return String.format(
-                "Mình đã ghi nhận đơn %s, số lượng %s, giao đến %s. Cửa hàng sẽ xử lý sớm nhé.",
+                "Minh da ghi nhan don %s, so luong %s, giao den %s. Cua hang se xu ly som nhe.",
                 parsed.getRiceType(),
                 parsed.getQuantity(),
                 parsed.getAddress());
@@ -166,6 +172,6 @@ public class MessengerWebhookController {
     }
 
     private String fallbackReply() {
-        return "Mình là trợ lý của cửa hàng gạo. Bạn có thể hỏi về gạo hoặc nhắn đơn hàng, ví dụ: 2kg ST25 giao tới Quận 10.";
+        return "Hiện tại nếu hệ thống có hiện tượng chập chờn hoặc gặp vấn đề, bạn có thể liên hệ SĐT 0342504323 để đặt hàng nhé";
     }
 }
