@@ -1,10 +1,26 @@
 package com.ricestoremanagement.controller;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.ricestoremanagement.dto.ai.AiChatbotResult;
+import com.ricestoremanagement.dto.ai.AiParsedOrder;
+import com.ricestoremanagement.dto.messenger.WebhookEntry;
+import com.ricestoremanagement.dto.messenger.WebhookMessaging;
+import com.ricestoremanagement.dto.messenger.WebhookPayload;
+import com.ricestoremanagement.model.Order;
+import com.ricestoremanagement.model.RiceProduct;
+import com.ricestoremanagement.model.enums.OrderSource;
+import com.ricestoremanagement.model.enums.OrderStatus;
+import com.ricestoremanagement.repository.OrderRepository;
+import com.ricestoremanagement.service.AiParsingService;
+import com.ricestoremanagement.service.MessengerGraphApiService;
+import com.ricestoremanagement.service.RiceProductService;
 import java.math.BigDecimal;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-
+import java.util.concurrent.ConcurrentHashMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -17,25 +33,11 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.ricestoremanagement.dto.ai.AiChatbotResult;
-import com.ricestoremanagement.dto.ai.AiParsedOrder;
-import com.ricestoremanagement.dto.messenger.WebhookEntry;
-import com.ricestoremanagement.dto.messenger.WebhookMessaging;
-import com.ricestoremanagement.dto.messenger.WebhookPayload;
-import com.ricestoremanagement.model.Order;
-import com.ricestoremanagement.model.enums.OrderSource;
-import com.ricestoremanagement.model.enums.OrderStatus;
-import com.ricestoremanagement.repository.OrderRepository;
-import com.ricestoremanagement.service.AiParsingService;
-import com.ricestoremanagement.service.MessengerGraphApiService;
-import com.ricestoremanagement.service.RiceProductService;
-
 @RestController
 @RequestMapping("/webhook")
 public class MessengerWebhookController {
     private static final Logger log = LoggerFactory.getLogger(MessengerWebhookController.class);
+    private static final long MESSAGE_DEDUP_TTL_MS = 10 * 60 * 1000;
 
     private final String verifyToken;
     private final AiParsingService aiParsingService;
@@ -43,6 +45,7 @@ public class MessengerWebhookController {
     private final MessengerGraphApiService messengerGraphApiService;
     private final RiceProductService riceProductService;
     private final ObjectMapper objectMapper;
+    private final Map<String, Long> handledMessageIds = new ConcurrentHashMap<>();
 
     public MessengerWebhookController(
             @Value("${meta.webhook.verify-token:}") String verifyToken,
@@ -72,23 +75,31 @@ public class MessengerWebhookController {
 
     @PostMapping
     public ResponseEntity<String> receiveMessage(@RequestBody WebhookPayload payload) {
+        long webhookStartNs = System.nanoTime();
         if (payload == null || payload.getEntry() == null) {
+            log.info("Messenger timing webhook_total durationMs=0 messages=0");
             return ResponseEntity.ok("EVENT_RECEIVED");
         }
 
+        int handledMessages = 0;
         for (WebhookEntry entry : payload.getEntry()) {
             if (entry.getMessaging() == null) {
                 continue;
             }
             for (WebhookMessaging messaging : entry.getMessaging()) {
                 handleIncomingMessage(messaging);
+                handledMessages++;
             }
         }
 
+        log.info("Messenger timing webhook_total durationMs={} messages={}",
+                elapsedMs(webhookStartNs),
+                handledMessages);
         return ResponseEntity.ok("EVENT_RECEIVED");
     }
 
     private void handleIncomingMessage(WebhookMessaging messaging) {
+        long messageStartNs = System.nanoTime();
         if (messaging == null || messaging.getMessage() == null) {
             return;
         }
@@ -99,24 +110,49 @@ public class MessengerWebhookController {
             return;
         }
 
-        Optional<AiChatbotResult> resultOpt = aiParsingService.chat(text, riceProductService.getProducts(true));
+        if (isDuplicateMessage(messaging)) {
+            log.info("Messenger timing message_total durationMs={} outcome=duplicate_skipped", elapsedMs(messageStartNs));
+            return;
+        }
+
+        long catalogStartNs = System.nanoTime();
+        List<RiceProduct> activeProducts = riceProductService.getProducts(true);
+        log.info("Messenger timing catalog_query durationMs={} products={}",
+                elapsedMs(catalogStartNs),
+                activeProducts.size());
+
+        long aiStartNs = System.nanoTime();
+        Optional<AiChatbotResult> resultOpt = aiParsingService.chat(text, activeProducts);
+        log.info("Messenger timing ai_total durationMs={} success={}",
+                elapsedMs(aiStartNs),
+                resultOpt.isPresent());
+
         if (resultOpt.isEmpty()) {
+            long replyStartNs = System.nanoTime();
             messengerGraphApiService.sendTextMessage(senderId, fallbackReply());
+            log.info("Messenger timing fallback_reply_total durationMs={}", elapsedMs(replyStartNs));
+            log.info("Messenger timing message_total durationMs={} outcome=fallback", elapsedMs(messageStartNs));
             return;
         }
 
         AiChatbotResult result = resultOpt.get();
         if (!result.isOrderIntent()) {
+            long replyStartNs = System.nanoTime();
             messengerGraphApiService.sendTextMessage(
                     senderId,
                     result.replyOrDefault(fallbackReply()));
+            log.info("Messenger timing reply_total durationMs={}", elapsedMs(replyStartNs));
+            log.info("Messenger timing message_total durationMs={} outcome=general_chat", elapsedMs(messageStartNs));
             return;
         }
 
         if (!result.isCompleteOrder()) {
+            long replyStartNs = System.nanoTime();
             messengerGraphApiService.sendTextMessage(
                     senderId,
                     result.replyOrDefault("Ban cho minh xin them loai gao, so luong va dia chi giao hang nhe."));
+            log.info("Messenger timing reply_total durationMs={}", elapsedMs(replyStartNs));
+            log.info("Messenger timing message_total durationMs={} outcome=incomplete_order", elapsedMs(messageStartNs));
             return;
         }
 
@@ -129,13 +165,18 @@ public class MessengerWebhookController {
         order.setSource(OrderSource.MESSENGER);
         order.setStatus(OrderStatus.PENDING);
 
+        long saveStartNs = System.nanoTime();
         orderRepository.save(order);
+        log.info("Messenger timing order_save durationMs={}", elapsedMs(saveStartNs));
 
+        long replyStartNs = System.nanoTime();
         messengerGraphApiService.sendTextMessage(
                 senderId,
                 result.replyOrDefault(buildConfirmationMessage(parsed)));
+        log.info("Messenger timing reply_total durationMs={}", elapsedMs(replyStartNs));
 
         log.info("Created Messenger order from sender {}", senderId);
+        log.info("Messenger timing message_total durationMs={} outcome=order_created", elapsedMs(messageStartNs));
     }
 
     private String buildProductDetailsJson(AiParsedOrder parsed, String rawText) {
@@ -172,6 +213,30 @@ public class MessengerWebhookController {
     }
 
     private String fallbackReply() {
-        return "Hiện tại nếu hệ thống có hiện tượng chập chờn hoặc gặp vấn đề, bạn có thể liên hệ SĐT 0342504323 để đặt hàng nhé";
+        return "Hien tai neu he thong chap chon hoac gap van de, ban co the lien he SDT 0342504323 de dat hang nhe.";
+    }
+
+    private boolean isDuplicateMessage(WebhookMessaging messaging) {
+        String messageId = messaging.getMessage().getMid();
+        if (messageId == null || messageId.trim().isEmpty()) {
+            return false;
+        }
+
+        long now = System.currentTimeMillis();
+        pruneHandledMessageIds(now);
+        Long existing = handledMessageIds.putIfAbsent(messageId, now);
+        if (existing != null) {
+            log.info("Skipping duplicate Messenger message id={}", messageId);
+            return true;
+        }
+        return false;
+    }
+
+    private void pruneHandledMessageIds(long now) {
+        handledMessageIds.entrySet().removeIf(entry -> now - entry.getValue() > MESSAGE_DEDUP_TTL_MS);
+    }
+
+    private long elapsedMs(long startNs) {
+        return (System.nanoTime() - startNs) / 1_000_000;
     }
 }

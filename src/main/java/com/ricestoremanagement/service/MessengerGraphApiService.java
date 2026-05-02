@@ -25,6 +25,7 @@ public class MessengerGraphApiService {
     }
 
     public void sendTextMessage(String recipientId, String text) {
+        long startNs = System.nanoTime();
         if (recipientId == null || recipientId.trim().isEmpty() || text == null || text.trim().isEmpty()) {
             return;
         }
@@ -47,8 +48,14 @@ public class MessengerGraphApiService {
                     .body(payload)
                     .retrieve()
                     .toBodilessEntity();
+            log.info("Messenger timing graph_send durationMs={} success=true", elapsedMs(startNs));
         } catch (RestClientException ex) {
+            log.info("Messenger timing graph_send durationMs={} success=false", elapsedMs(startNs));
             log.warn("Failed to send Messenger reply: {}", ex.getMessage());
         }
+    }
+
+    private long elapsedMs(long startNs) {
+        return (System.nanoTime() - startNs) / 1_000_000;
     }
 }

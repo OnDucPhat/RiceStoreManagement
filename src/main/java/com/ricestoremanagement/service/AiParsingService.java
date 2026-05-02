@@ -1,5 +1,6 @@
 package com.ricestoremanagement.service;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -10,6 +11,7 @@ import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
@@ -60,6 +62,8 @@ public class AiParsingService {
             @Value("${ai.gemini.base-url:https://generativelanguage.googleapis.com/v1beta}") String geminiBaseUrl,
             @Value("${ai.gemini.key:}") String geminiKey,
             @Value("${ai.gemini.model:gemini-1.5-flash}") String geminiModel,
+            @Value("${ai.timeout.connect-ms:120000}") long aiConnectTimeoutMs,
+            @Value("${ai.timeout.read-ms:120000}") long aiReadTimeoutMs,
             @Value("${ai.parse.system-prompt:Extract order fields and return JSON with keys rice_type, quantity, address. Use empty string for missing values.}")
                     String systemPrompt) {
         this.objectMapper = objectMapper;
@@ -69,8 +73,8 @@ public class AiParsingService {
         this.geminiKey = geminiKey;
         this.geminiModel = geminiModel;
         this.systemPrompt = systemPrompt;
-        this.openAiClient = RestClient.builder().baseUrl(openAiBaseUrl).build();
-        this.geminiClient = RestClient.builder().baseUrl(geminiBaseUrl).build();
+        this.openAiClient = buildRestClient(openAiBaseUrl, aiConnectTimeoutMs, aiReadTimeoutMs);
+        this.geminiClient = buildRestClient(geminiBaseUrl, aiConnectTimeoutMs, aiReadTimeoutMs);
     }
 
     public Optional<AiChatbotResult> chat(String messageText) {
@@ -81,13 +85,21 @@ public class AiParsingService {
         if (messageText == null || messageText.trim().isEmpty()) {
             return Optional.empty();
         }
+        long startNs = System.nanoTime();
+        Optional<AiChatbotResult> result;
         if ("gemini".equalsIgnoreCase(provider)) {
-            return chatWithGemini(messageText, riceCatalog);
+            result = chatWithGemini(messageText, riceCatalog);
+        } else {
+            if (!"openai".equalsIgnoreCase(provider)) {
+                log.warn("Unknown ai.provider value '{}'; falling back to OpenAI", provider);
+            }
+            result = chatWithOpenAi(messageText, riceCatalog);
         }
-        if (!"openai".equalsIgnoreCase(provider)) {
-            log.warn("Unknown ai.provider value '{}'; falling back to OpenAI", provider);
-        }
-        return chatWithOpenAi(messageText, riceCatalog);
+        log.info("Messenger timing ai_provider={} durationMs={} success={}",
+                provider,
+                elapsedMs(startNs),
+                result.isPresent());
+        return result;
     }
 
     public Optional<AiParsedOrder> parseOrder(String messageText) {
@@ -106,19 +118,21 @@ public class AiParsingService {
             AiChatCompletionResponse response = sendOpenAiRequest(request);
 
             if (response == null || response.getChoices() == null || response.getChoices().isEmpty()) {
+                log.warn("OpenAI parsing returned no choices");
                 return Optional.empty();
             }
 
             AiChatCompletionChoice choice = response.getChoices().get(0);
             if (choice == null || choice.getMessage() == null) {
+                log.warn("OpenAI parsing returned an empty message");
                 return Optional.empty();
             }
             String content = choice.getMessage().getContent();
             return parseJson(content);
         } catch (HttpClientErrorException ex) {
-            return handleOpenAiHttpError(request, ex);
+            return handleOpenAiHttpError(ex);
         } catch (RestClientException ex) {
-            log.warn("OpenAI parsing request failed: {}", ex.getMessage());
+            log.warn("OpenAI parsing request failed type={} message={}", ex.getClass().getSimpleName(), ex.getMessage());
             return Optional.empty();
         }
     }
@@ -170,7 +184,6 @@ public class AiParsingService {
         request.put("model", openAiModel);
         request.put("messages", messages);
         request.put("temperature", 0.2);
-        request.put("response_format", Map.of("type", "json_object"));
         return request;
     }
 
@@ -185,29 +198,23 @@ public class AiParsingService {
                 .body(AiChatCompletionResponse.class);
     }
 
-    private Optional<AiChatbotResult> handleOpenAiHttpError(
-            Map<String, Object> request,
-            HttpClientErrorException ex) {
-        if (ex.getStatusCode().value() == 400 && request.containsKey("response_format")) {
-            try {
-                Map<String, Object> retryRequest = new LinkedHashMap<>(request);
-                retryRequest.remove("response_format");
-                AiChatCompletionResponse response = sendOpenAiRequest(retryRequest);
-                if (response == null || response.getChoices() == null || response.getChoices().isEmpty()) {
-                    return Optional.empty();
-                }
-                AiChatCompletionChoice choice = response.getChoices().get(0);
-                if (choice == null || choice.getMessage() == null) {
-                    return Optional.empty();
-                }
-                return parseJson(choice.getMessage().getContent());
-            } catch (RestClientException retryEx) {
-                log.warn("OpenAI parsing retry failed: {}", retryEx.getMessage());
-            }
-        }
+    private RestClient buildRestClient(String baseUrl, long connectTimeoutMs, long readTimeoutMs) {
+        SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
+        requestFactory.setConnectTimeout(Duration.ofMillis(connectTimeoutMs));
+        requestFactory.setReadTimeout(Duration.ofMillis(readTimeoutMs));
+        return RestClient.builder()
+                .baseUrl(baseUrl)
+                .requestFactory(requestFactory)
+                .build();
+    }
 
+    private Optional<AiChatbotResult> handleOpenAiHttpError(HttpClientErrorException ex) {
         log.warn("OpenAI parsing request failed: {} {}", ex.getStatusCode(), ex.getResponseBodyAsString());
         return Optional.empty();
+    }
+
+    private long elapsedMs(long startNs) {
+        return (System.nanoTime() - startNs) / 1_000_000;
     }
 
     private GeminiGenerateRequest buildGeminiRequest(String messageText, List<RiceProduct> riceCatalog) {
@@ -226,6 +233,7 @@ public class AiParsingService {
 
     private Optional<AiChatbotResult> parseJson(String content) {
         if (content == null || content.trim().isEmpty()) {
+            log.warn("AI response content is empty");
             return Optional.empty();
         }
 
@@ -234,9 +242,20 @@ public class AiParsingService {
             AiChatbotResult result = objectMapper.readValue(json, AiChatbotResult.class);
             return Optional.of(result);
         } catch (Exception ex) {
-            log.warn("Unable to parse AI response: {}", ex.getMessage());
+            log.warn("Unable to parse AI response: {} contentSnippet={}", ex.getMessage(), snippet(content));
             return Optional.empty();
         }
+    }
+
+    private String snippet(String content) {
+        if (content == null) {
+            return "";
+        }
+        String normalized = content.replaceAll("\\s+", " ").trim();
+        if (normalized.length() <= 300) {
+            return normalized;
+        }
+        return normalized.substring(0, 300);
     }
 
     private String chatbotPrompt(List<RiceProduct> riceCatalog) {
@@ -284,46 +303,6 @@ public class AiParsingService {
         return content.trim();
     }
 
-    private static class AiChatCompletionRequest {
-        private String model;
-        private List<AiChatMessage> messages;
-        private Double temperature;
-        @JsonProperty("response_format")
-        private AiResponseFormat responseFormat;
-
-        public String getModel() {
-            return model;
-        }
-
-        public void setModel(String model) {
-            this.model = model;
-        }
-
-        public List<AiChatMessage> getMessages() {
-            return messages;
-        }
-
-        public void setMessages(List<AiChatMessage> messages) {
-            this.messages = messages;
-        }
-
-        public Double getTemperature() {
-            return temperature;
-        }
-
-        public void setTemperature(Double temperature) {
-            this.temperature = temperature;
-        }
-
-        public AiResponseFormat getResponseFormat() {
-            return responseFormat;
-        }
-
-        public void setResponseFormat(AiResponseFormat responseFormat) {
-            this.responseFormat = responseFormat;
-        }
-    }
-
     @JsonIgnoreProperties(ignoreUnknown = true)
     private static class AiChatMessage {
         private String role;
@@ -351,25 +330,6 @@ public class AiParsingService {
 
         public void setContent(String content) {
             this.content = content;
-        }
-    }
-
-    private static class AiResponseFormat {
-        private String type;
-
-        public AiResponseFormat() {
-        }
-
-        public AiResponseFormat(String type) {
-            this.type = type;
-        }
-
-        public String getType() {
-            return type;
-        }
-
-        public void setType(String type) {
-            this.type = type;
         }
     }
 
