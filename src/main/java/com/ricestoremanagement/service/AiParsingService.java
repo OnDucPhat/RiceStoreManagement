@@ -37,7 +37,8 @@ public class AiParsingService {
             intent must be GENERAL_CHAT for greetings, questions, and non-order conversation.
             Use empty strings for missing order fields.
             If ORDER_CREATE is missing rice_type, quantity, address, or customer_phone, reply in natural Vietnamese asking only for the missing information.
-            If ORDER_CREATE is complete, reply in natural Vietnamese confirming the order details.
+            If ORDER_CREATE is complete, reply in natural Vietnamese summarizing the order and asking whether the customer wants to order anything else.
+            Do not tell the customer the order is finalized unless they explicitly confirmed it.
             If GENERAL_CHAT, reply as a helpful rice store assistant in Vietnamese.
             When recommending rice, use only the provided rice catalog. Mention prices from the catalog when useful.
             Keep reply concise, warm, and practical.
