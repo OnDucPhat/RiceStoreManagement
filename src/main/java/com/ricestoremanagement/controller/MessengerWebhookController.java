@@ -16,7 +16,9 @@ import com.ricestoremanagement.service.AiParsingService;
 import com.ricestoremanagement.service.MessengerGraphApiService;
 import com.ricestoremanagement.service.RiceProductService;
 import java.math.BigDecimal;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Deque;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -40,6 +42,8 @@ public class MessengerWebhookController {
     private static final Logger log = LoggerFactory.getLogger(MessengerWebhookController.class);
     private static final long MESSAGE_DEDUP_TTL_MS = 10 * 60 * 1000;
     private static final long ORDER_DRAFT_TTL_MS = 30 * 60 * 1000;
+    private static final long CONVERSATION_MEMORY_TTL_MS = 60 * 60 * 1000;
+    private static final int CONVERSATION_MEMORY_MAX_TURNS = 12;
 
     private final String verifyToken;
     private final AiParsingService aiParsingService;
@@ -49,6 +53,7 @@ public class MessengerWebhookController {
     private final ObjectMapper objectMapper;
     private final Map<String, Long> handledMessageIds = new ConcurrentHashMap<>();
     private final Map<String, PendingMessengerOrder> pendingOrderDrafts = new ConcurrentHashMap<>();
+    private final Map<String, MessengerConversationMemory> conversationMemories = new ConcurrentHashMap<>();
 
     public MessengerWebhookController(
             @Value("${meta.webhook.verify-token:}") String verifyToken,
@@ -124,15 +129,17 @@ public class MessengerWebhookController {
                 elapsedMs(catalogStartNs),
                 activeProducts.size());
 
+        String conversationContext = conversationContextFor(senderId);
         long aiStartNs = System.nanoTime();
-        Optional<AiChatbotResult> resultOpt = aiParsingService.chat(text, activeProducts);
+        Optional<AiChatbotResult> resultOpt = aiParsingService.chat(text, activeProducts, conversationContext);
         log.info("Messenger timing ai_total durationMs={} success={}",
                 elapsedMs(aiStartNs),
                 resultOpt.isPresent());
 
         if (resultOpt.isEmpty()) {
+            String reply = fallbackReply();
             long replyStartNs = System.nanoTime();
-            messengerGraphApiService.sendTextMessage(senderId, fallbackReply());
+            sendTextMessageAndRemember(senderId, text, reply);
             log.info("Messenger timing fallback_reply_total durationMs={}", elapsedMs(replyStartNs));
             log.info("Messenger timing message_total durationMs={} outcome=fallback", elapsedMs(messageStartNs));
             return;
@@ -140,21 +147,19 @@ public class MessengerWebhookController {
 
         AiChatbotResult result = resultOpt.get();
         PendingMessengerOrder existingDraft = getActiveOrderDraft(senderId);
-        if (!result.isOrderIntent() && existingDraft == null && !hasAnyOrderField(result)) {
+        if (!result.isOrderIntent() && existingDraft == null) {
+            String reply = result.replyOrDefault(fallbackReply());
             long replyStartNs = System.nanoTime();
-            messengerGraphApiService.sendTextMessage(
-                    senderId,
-                    result.replyOrDefault(fallbackReply()));
+            sendTextMessageAndRemember(senderId, text, reply);
             log.info("Messenger timing reply_total durationMs={}", elapsedMs(replyStartNs));
             log.info("Messenger timing message_total durationMs={} outcome=general_chat", elapsedMs(messageStartNs));
             return;
         }
 
         if (!result.isOrderIntent() && existingDraft != null && !hasAnyOrderField(result)) {
+            String reply = result.replyOrDefault(fallbackReply());
             long replyStartNs = System.nanoTime();
-            messengerGraphApiService.sendTextMessage(
-                    senderId,
-                    result.replyOrDefault(fallbackReply()));
+            sendTextMessageAndRemember(senderId, text, reply);
             log.info("Messenger timing reply_total durationMs={}", elapsedMs(replyStartNs));
             log.info("Messenger timing message_total durationMs={} outcome=general_chat_with_pending_order",
                     elapsedMs(messageStartNs));
@@ -166,8 +171,9 @@ public class MessengerWebhookController {
         pendingOrderDrafts.put(senderId, draft);
 
         if (!draft.isComplete()) {
+            String reply = buildMissingInfoMessage(draft);
             long replyStartNs = System.nanoTime();
-            messengerGraphApiService.sendTextMessage(senderId, buildMissingInfoMessage(draft));
+            sendTextMessageAndRemember(senderId, text, reply);
             log.info("Messenger timing reply_total durationMs={}", elapsedMs(replyStartNs));
             log.info("Messenger timing message_total durationMs={} outcome=incomplete_order", elapsedMs(messageStartNs));
             return;
@@ -187,10 +193,9 @@ public class MessengerWebhookController {
         log.info("Messenger timing order_save durationMs={}", elapsedMs(saveStartNs));
         pendingOrderDrafts.remove(senderId);
 
+        String reply = buildConfirmationMessage(parsed);
         long replyStartNs = System.nanoTime();
-        messengerGraphApiService.sendTextMessage(
-                senderId,
-                buildConfirmationMessage(parsed));
+        sendTextMessageAndRemember(senderId, text, reply);
         log.info("Messenger timing reply_total durationMs={}", elapsedMs(replyStartNs));
 
         log.info("Created Messenger order from sender {}", senderId);
@@ -223,6 +228,37 @@ public class MessengerWebhookController {
 
     private String fallbackReply() {
         return "Hien tai neu he thong chap chon hoac gap van de, ban co the lien he SDT 0342504323 de dat hang nhe.";
+    }
+
+    private String conversationContextFor(String senderId) {
+        long now = System.currentTimeMillis();
+        pruneConversationMemories(now);
+        MessengerConversationMemory memory = conversationMemories.get(senderId);
+        if (memory == null) {
+            return "";
+        }
+        if (memory.isExpired(now)) {
+            conversationMemories.remove(senderId);
+            return "";
+        }
+        return memory.toPromptContext();
+    }
+
+    private void sendTextMessageAndRemember(String senderId, String userText, String replyText) {
+        messengerGraphApiService.sendTextMessage(senderId, replyText);
+        rememberConversationTurn(senderId, userText, replyText);
+    }
+
+    private void rememberConversationTurn(String senderId, String userText, String replyText) {
+        long now = System.currentTimeMillis();
+        pruneConversationMemories(now);
+        conversationMemories
+                .computeIfAbsent(senderId, key -> new MessengerConversationMemory())
+                .add(userText, replyText);
+    }
+
+    private void pruneConversationMemories(long now) {
+        conversationMemories.entrySet().removeIf(entry -> entry.getValue().isExpired(now));
     }
 
     private PendingMessengerOrder getActiveOrderDraft(String senderId) {
@@ -355,6 +391,71 @@ public class MessengerWebhookController {
 
         private static boolean isNotBlank(String value) {
             return value != null && !value.trim().isEmpty();
+        }
+    }
+
+    private static class MessengerConversationMemory {
+        private final Deque<ConversationTurn> turns = new ArrayDeque<>();
+        private long updatedAtMs = System.currentTimeMillis();
+
+        private synchronized void add(String userText, String replyText) {
+            if (!isNotBlank(userText) && !isNotBlank(replyText)) {
+                return;
+            }
+            turns.addLast(new ConversationTurn(clean(userText), clean(replyText)));
+            while (turns.size() > CONVERSATION_MEMORY_MAX_TURNS) {
+                turns.removeFirst();
+            }
+            updatedAtMs = System.currentTimeMillis();
+        }
+
+        private synchronized String toPromptContext() {
+            if (turns.isEmpty()) {
+                return "";
+            }
+            StringBuilder context = new StringBuilder();
+            int index = 1;
+            for (ConversationTurn turn : turns) {
+                context.append(index)
+                        .append(". Customer: ")
+                        .append(turn.userText)
+                        .append("\n")
+                        .append(index)
+                        .append(". Assistant: ")
+                        .append(turn.replyText)
+                        .append("\n");
+                index++;
+            }
+            return context.toString().trim();
+        }
+
+        private boolean isExpired(long now) {
+            return now - updatedAtMs > CONVERSATION_MEMORY_TTL_MS;
+        }
+
+        private static String clean(String value) {
+            if (value == null) {
+                return "";
+            }
+            String normalized = value.replaceAll("\\s+", " ").trim();
+            if (normalized.length() <= 500) {
+                return normalized;
+            }
+            return normalized.substring(0, 500);
+        }
+
+        private static boolean isNotBlank(String value) {
+            return value != null && !value.trim().isEmpty();
+        }
+    }
+
+    private static class ConversationTurn {
+        private final String userText;
+        private final String replyText;
+
+        private ConversationTurn(String userText, String replyText) {
+            this.userText = userText;
+            this.replyText = replyText;
         }
     }
 }

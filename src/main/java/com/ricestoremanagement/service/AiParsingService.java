@@ -82,18 +82,25 @@ public class AiParsingService {
     }
 
     public Optional<AiChatbotResult> chat(String messageText, List<RiceProduct> riceCatalog) {
+        return chat(messageText, riceCatalog, "");
+    }
+
+    public Optional<AiChatbotResult> chat(
+            String messageText,
+            List<RiceProduct> riceCatalog,
+            String conversationContext) {
         if (messageText == null || messageText.trim().isEmpty()) {
             return Optional.empty();
         }
         long startNs = System.nanoTime();
         Optional<AiChatbotResult> result;
         if ("gemini".equalsIgnoreCase(provider)) {
-            result = chatWithGemini(messageText, riceCatalog);
+            result = chatWithGemini(messageText, riceCatalog, conversationContext);
         } else {
             if (!"openai".equalsIgnoreCase(provider)) {
                 log.warn("Unknown ai.provider value '{}'; falling back to OpenAI", provider);
             }
-            result = chatWithOpenAi(messageText, riceCatalog);
+            result = chatWithOpenAi(messageText, riceCatalog, conversationContext);
         }
         log.info("Messenger timing ai_provider={} durationMs={} success={}",
                 provider,
@@ -106,13 +113,16 @@ public class AiParsingService {
         return chat(messageText).map(this::toParsedOrder);
     }
 
-    private Optional<AiChatbotResult> chatWithOpenAi(String messageText, List<RiceProduct> riceCatalog) {
+    private Optional<AiChatbotResult> chatWithOpenAi(
+            String messageText,
+            List<RiceProduct> riceCatalog,
+            String conversationContext) {
         if (openAiKey == null || openAiKey.trim().isEmpty()) {
             log.warn("OpenAI key not configured; skipping AI parsing");
             return Optional.empty();
         }
 
-        Map<String, Object> request = buildOpenAiRequest(messageText, riceCatalog);
+        Map<String, Object> request = buildOpenAiRequest(messageText, riceCatalog, conversationContext);
 
         try {
             AiChatCompletionResponse response = sendOpenAiRequest(request);
@@ -137,13 +147,16 @@ public class AiParsingService {
         }
     }
 
-    private Optional<AiChatbotResult> chatWithGemini(String messageText, List<RiceProduct> riceCatalog) {
+    private Optional<AiChatbotResult> chatWithGemini(
+            String messageText,
+            List<RiceProduct> riceCatalog,
+            String conversationContext) {
         if (geminiKey == null || geminiKey.trim().isEmpty()) {
             log.warn("Gemini key not configured; skipping AI parsing");
             return Optional.empty();
         }
 
-        GeminiGenerateRequest request = buildGeminiRequest(messageText, riceCatalog);
+        GeminiGenerateRequest request = buildGeminiRequest(messageText, riceCatalog, conversationContext);
 
         try {
             GeminiGenerateResponse response = geminiClient.post()
@@ -175,9 +188,12 @@ public class AiParsingService {
         }
     }
 
-    private Map<String, Object> buildOpenAiRequest(String messageText, List<RiceProduct> riceCatalog) {
+    private Map<String, Object> buildOpenAiRequest(
+            String messageText,
+            List<RiceProduct> riceCatalog,
+            String conversationContext) {
         List<Map<String, String>> messages = new ArrayList<>();
-        messages.add(Map.of("role", "system", "content", chatbotPrompt(riceCatalog)));
+        messages.add(Map.of("role", "system", "content", chatbotPrompt(riceCatalog, conversationContext)));
         messages.add(Map.of("role", "user", "content", messageText));
 
         Map<String, Object> request = new LinkedHashMap<>();
@@ -217,11 +233,14 @@ public class AiParsingService {
         return (System.nanoTime() - startNs) / 1_000_000;
     }
 
-    private GeminiGenerateRequest buildGeminiRequest(String messageText, List<RiceProduct> riceCatalog) {
+    private GeminiGenerateRequest buildGeminiRequest(
+            String messageText,
+            List<RiceProduct> riceCatalog,
+            String conversationContext) {
         GeminiGenerateRequest request = new GeminiGenerateRequest();
 
         GeminiContent systemInstruction = new GeminiContent(null,
-                List.of(new GeminiPart(chatbotPrompt(riceCatalog))));
+                List.of(new GeminiPart(chatbotPrompt(riceCatalog, conversationContext))));
         GeminiContent userContent = new GeminiContent("user",
                 List.of(new GeminiPart(messageText)));
 
@@ -259,6 +278,10 @@ public class AiParsingService {
     }
 
     private String chatbotPrompt(List<RiceProduct> riceCatalog) {
+        return chatbotPrompt(riceCatalog, "");
+    }
+
+    private String chatbotPrompt(List<RiceProduct> riceCatalog, String conversationContext) {
         String basePrompt;
         if (systemPrompt == null || systemPrompt.trim().isEmpty()
                 || !systemPrompt.contains("intent")) {
@@ -267,11 +290,34 @@ public class AiParsingService {
             basePrompt = systemPrompt;
         }
 
+        String memory = buildConversationMemoryPrompt(conversationContext);
         String catalog = buildCatalogPrompt(riceCatalog);
-        if (catalog.isEmpty()) {
+        if (memory.isEmpty() && catalog.isEmpty()) {
             return basePrompt;
         }
-        return basePrompt + "\n\nRice catalog:\n" + catalog;
+        StringBuilder prompt = new StringBuilder(basePrompt);
+        if (!memory.isEmpty()) {
+            prompt.append("\n\n").append(memory);
+        }
+        if (!catalog.isEmpty()) {
+            prompt.append("\n\nRice catalog:\n").append(catalog);
+        }
+        return prompt.toString();
+    }
+
+    private String buildConversationMemoryPrompt(String conversationContext) {
+        if (conversationContext == null || conversationContext.trim().isEmpty()) {
+            return "";
+        }
+        return """
+                Recent Messenger conversation memory:
+                %s
+
+                Use this memory to answer follow-up questions about what the customer already asked, compared, chose, or ordered.
+                If the customer asks what they mentioned earlier, answer from this memory.
+                For new orders, do not reuse address, phone, rice type, or quantity from an already completed order unless the customer explicitly says to use the same information.
+                """
+                .formatted(conversationContext.trim());
     }
 
     private String buildCatalogPrompt(List<RiceProduct> riceCatalog) {
