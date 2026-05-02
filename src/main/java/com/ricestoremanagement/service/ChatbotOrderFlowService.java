@@ -1,6 +1,7 @@
 package com.ricestoremanagement.service;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.text.Normalizer;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -11,6 +12,8 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -33,6 +36,10 @@ public class ChatbotOrderFlowService {
     private static final long ORDER_DRAFT_TTL_MS = 30 * 60 * 1000;
     private static final long CONVERSATION_MEMORY_TTL_MS = 60 * 60 * 1000;
     private static final int CONVERSATION_MEMORY_MAX_TURNS = 12;
+    private static final Pattern FIRST_NUMBER_PATTERN = Pattern.compile("(\\d+(?:[\\.,]\\d+)?)");
+    private static final Pattern QUANTITY_TEXT_PATTERN = Pattern.compile(
+            "\\b\\d+(?:[\\.,]\\d+)?\\s*(?:kg|kilogram|kilo|ky|ki|can|bao)\\b",
+            Pattern.CASE_INSENSITIVE);
 
     private final AiParsingService aiParsingService;
     private final OrderRepository orderRepository;
@@ -72,7 +79,7 @@ public class ChatbotOrderFlowService {
         PendingChatOrder existingDraft = getActiveOrderDraft(conversationKey);
         if (existingDraft != null && existingDraft.isAwaitingConfirmation()) {
             if (isConfirmationMessage(normalizedText)) {
-                Order order = saveOrder(customerName, orderSource, existingDraft);
+                Order order = saveOrder(customerName, orderSource, existingDraft, activeProducts);
                 pendingOrderDrafts.remove(conversationKey);
 
                 String reply = buildConfirmationMessage(existingDraft, order);
@@ -178,14 +185,19 @@ public class ChatbotOrderFlowService {
         return new ChatMessageResponse(sessionId, replyText, orderId, orderCreated, outcome);
     }
 
-    private Order saveOrder(String customerName, OrderSource orderSource, PendingChatOrder draft) {
+    private Order saveOrder(
+            String customerName,
+            OrderSource orderSource,
+            PendingChatOrder draft,
+            List<RiceProduct> activeProducts) {
         AiParsedOrder parsed = draft.toParsedOrder();
+        OrderPricing pricing = priceOrder(draft, activeProducts);
         Order order = new Order();
         order.setCustomerName(customerName);
         order.setCustomerPhone(parsed.getCustomerPhone());
         order.setAddress(parsed.getAddress());
-        order.setProductDetails(buildProductDetailsJson(draft));
-        order.setTotalPrice(BigDecimal.ZERO);
+        order.setProductDetails(buildProductDetailsJson(draft, pricing));
+        order.setTotalPrice(pricing.totalPrice());
         order.setSource(orderSource);
         order.setStatus(OrderStatus.PENDING);
 
@@ -195,14 +207,120 @@ public class ChatbotOrderFlowService {
         return savedOrder;
     }
 
-    private String buildProductDetailsJson(PendingChatOrder draft) {
+    private OrderPricing priceOrder(PendingChatOrder draft, List<RiceProduct> activeProducts) {
+        List<OrderLine> lines = new ArrayList<>();
+        BigDecimal totalPrice = BigDecimal.ZERO;
+
+        for (PendingChatOrderItem item : draft.normalizedItemsForOrder()) {
+            String riceType = cleanRiceTypeText(item.riceType);
+            BigDecimal quantityKg = parseQuantityKg(item.quantity);
+            RiceProduct product = findBestProduct(riceType, activeProducts).orElse(null);
+            BigDecimal lineTotal = null;
+            if (product != null && quantityKg != null) {
+                lineTotal = product.getPricePerKg()
+                        .multiply(quantityKg)
+                        .setScale(2, RoundingMode.HALF_UP);
+                totalPrice = totalPrice.add(lineTotal);
+            }
+            lines.add(new OrderLine(riceType, item.quantity, quantityKg, product, lineTotal));
+        }
+
+        return new OrderPricing(lines, totalPrice.setScale(2, RoundingMode.HALF_UP));
+    }
+
+    private Optional<RiceProduct> findBestProduct(String riceType, List<RiceProduct> activeProducts) {
+        String lookup = normalizeProductLookupText(riceType);
+        if (lookup.isEmpty() || activeProducts == null || activeProducts.isEmpty()) {
+            return Optional.empty();
+        }
+
+        RiceProduct bestProduct = null;
+        int bestScore = 0;
+        for (RiceProduct product : activeProducts) {
+            if (product == null || !product.isActive()) {
+                continue;
+            }
+            String productName = normalizeProductLookupText(product.getName());
+            int score = productMatchScore(lookup, productName);
+            if (score > bestScore) {
+                bestProduct = product;
+                bestScore = score;
+            }
+        }
+        return Optional.ofNullable(bestProduct);
+    }
+
+    private int productMatchScore(String lookup, String productName) {
+        if (lookup.isEmpty() || productName.isEmpty()) {
+            return 0;
+        }
+        if (lookup.equals(productName)) {
+            return 10_000;
+        }
+        String lookupWithoutPrefix = removeRicePrefix(lookup);
+        String productWithoutPrefix = removeRicePrefix(productName);
+        if (lookupWithoutPrefix.equals(productWithoutPrefix)) {
+            return 9_000;
+        }
+        if (productName.contains(lookup)) {
+            return 5_000 + lookup.length();
+        }
+        if (lookup.contains(productName)) {
+            return 4_000 + productName.length();
+        }
+        if (productWithoutPrefix.contains(lookupWithoutPrefix)) {
+            return 3_000 + lookupWithoutPrefix.length();
+        }
+        if (lookupWithoutPrefix.contains(productWithoutPrefix)) {
+            return 2_000 + productWithoutPrefix.length();
+        }
+        return 0;
+    }
+
+    private String removeRicePrefix(String value) {
+        return value.replaceFirst("^gao\\s+", "").trim();
+    }
+
+    private String normalizeProductLookupText(String value) {
+        return cleanRiceTypeText(normalizeVietnameseText(value))
+                .replaceAll("\\s+", " ")
+                .trim();
+    }
+
+    private BigDecimal parseQuantityKg(String quantity) {
+        if (quantity == null) {
+            return null;
+        }
+        Matcher matcher = FIRST_NUMBER_PATTERN.matcher(quantity.replace(',', '.'));
+        if (!matcher.find()) {
+            return null;
+        }
+        try {
+            return new BigDecimal(matcher.group(1)).setScale(2, RoundingMode.HALF_UP);
+        } catch (NumberFormatException ex) {
+            return null;
+        }
+    }
+
+    private static String cleanRiceTypeText(String value) {
+        if (value == null) {
+            return "";
+        }
+        return QUANTITY_TEXT_PATTERN.matcher(value)
+                .replaceAll(" ")
+                .replaceAll("\\s+", " ")
+                .trim();
+    }
+
+    private String buildProductDetailsJson(PendingChatOrder draft, OrderPricing pricing) {
         Map<String, Object> details = new LinkedHashMap<>();
         AiParsedOrder parsed = draft.toParsedOrder();
         details.put("rice_type", parsed.getRiceType());
         details.put("quantity", parsed.getQuantity());
         details.put("address", parsed.getAddress());
         details.put("customer_phone", parsed.getCustomerPhone());
-        details.put("items", draft.orderItemsForJson());
+        details.put("items", pricing.itemsForJson());
+        details.put("total_price", pricing.totalPrice());
         details.put("raw_message", draft.rawText());
 
         try {
@@ -499,16 +617,37 @@ public class ChatbotOrderFlowService {
             return String.join(" | ", rawMessages);
         }
 
-        private List<Map<String, String>> orderItemsForJson() {
+        private List<PendingChatOrderItem> normalizedItemsForOrder() {
             upsertCurrentItem();
-            List<Map<String, String>> itemMaps = new ArrayList<>();
+            List<PendingChatOrderItem> normalizedItems = new ArrayList<>();
             for (PendingChatOrderItem item : items) {
-                Map<String, String> itemMap = new LinkedHashMap<>();
-                itemMap.put("rice_type", item.riceType);
-                itemMap.put("quantity", item.quantity);
-                itemMaps.add(itemMap);
+                normalizedItems.addAll(expandDelimitedItem(item));
             }
-            return itemMaps;
+            return normalizedItems;
+        }
+
+        private List<PendingChatOrderItem> expandDelimitedItem(PendingChatOrderItem item) {
+            if (!isNotBlank(item.riceType) || !isNotBlank(item.quantity)) {
+                return List.of();
+            }
+
+            String[] riceParts = splitDelimitedValues(item.riceType);
+            String[] quantityParts = splitDelimitedValues(item.quantity);
+            if (riceParts.length <= 1 || quantityParts.length <= 1 || riceParts.length != quantityParts.length) {
+                return List.of(item);
+            }
+
+            List<PendingChatOrderItem> expandedItems = new ArrayList<>();
+            for (int index = 0; index < riceParts.length; index++) {
+                if (isNotBlank(riceParts[index]) && isNotBlank(quantityParts[index])) {
+                    expandedItems.add(new PendingChatOrderItem(riceParts[index].trim(), quantityParts[index].trim()));
+                }
+            }
+            return expandedItems.isEmpty() ? List.of(item) : expandedItems;
+        }
+
+        private String[] splitDelimitedValues(String value) {
+            return value.split("\\s*;\\s*");
         }
 
         private String summaryForMessage() {
@@ -572,6 +711,32 @@ public class ChatbotOrderFlowService {
             return this.riceType.equalsIgnoreCase(riceType.trim())
                     && this.quantity.equalsIgnoreCase(quantity.trim());
         }
+    }
+
+    private record OrderPricing(List<OrderLine> lines, BigDecimal totalPrice) {
+        private List<Map<String, Object>> itemsForJson() {
+            List<Map<String, Object>> itemMaps = new ArrayList<>();
+            for (OrderLine line : lines) {
+                Map<String, Object> itemMap = new LinkedHashMap<>();
+                itemMap.put("rice_type", line.riceType());
+                itemMap.put("quantity", line.quantityText());
+                itemMap.put("quantity_kg", line.quantityKg());
+                itemMap.put("product_id", line.product() != null ? line.product().getId() : null);
+                itemMap.put("product_name", line.product() != null ? line.product().getName() : null);
+                itemMap.put("price_per_kg", line.product() != null ? line.product().getPricePerKg() : null);
+                itemMap.put("line_total", line.lineTotal());
+                itemMaps.add(itemMap);
+            }
+            return itemMaps;
+        }
+    }
+
+    private record OrderLine(
+            String riceType,
+            String quantityText,
+            BigDecimal quantityKg,
+            RiceProduct product,
+            BigDecimal lineTotal) {
     }
 
     private static class ChatConversationMemory {

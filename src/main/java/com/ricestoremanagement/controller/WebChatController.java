@@ -3,8 +3,6 @@ package com.ricestoremanagement.controller;
 import java.util.UUID;
 
 import org.springframework.http.ResponseEntity;
-import org.springframework.stereotype.Controller;
-import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -16,14 +14,6 @@ import com.ricestoremanagement.model.enums.OrderSource;
 import com.ricestoremanagement.service.ChatbotOrderFlowService;
 
 import jakarta.validation.Valid;
-
-@Controller
-class WebChatPageController {
-    @GetMapping("/chat")
-    public String chatPage() {
-        return "forward:/chat.html";
-    }
-}
 
 @RestController
 @RequestMapping("/api/chat")

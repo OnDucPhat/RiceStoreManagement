@@ -9,6 +9,7 @@ import jakarta.validation.Valid;
 import java.util.List;
 import java.util.stream.Collectors;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -27,6 +28,7 @@ public class ShipperOrderController {
     }
 
     @GetMapping("/shippers/{shipperId}/orders")
+    @PreAuthorize("hasRole('ADMIN') or @shipperSecurity.isSelf(authentication, #shipperId)")
     public List<OrderResponse> getAssignedOrders(
             @PathVariable Long shipperId,
             @RequestParam(name = "status", required = false) OrderStatus status) {
@@ -35,6 +37,7 @@ public class ShipperOrderController {
     }
 
     @PutMapping("/orders/{id}/deliver")
+    @PreAuthorize("hasRole('ADMIN') or @shipperSecurity.isSelf(authentication, #request.shipperId)")
     public ResponseEntity<OrderResponse> markDelivered(
             @PathVariable Long id,
             @Valid @RequestBody OrderDeliverRequest request) {

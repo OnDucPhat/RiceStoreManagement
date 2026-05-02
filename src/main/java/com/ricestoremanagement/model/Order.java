@@ -11,7 +11,6 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
-import jakarta.persistence.Lob;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 import java.math.BigDecimal;
@@ -32,8 +31,7 @@ public class Order {
     @Column(nullable = false, length = 500)
     private String address;
 
-    @Lob
-    @Column(name = "product_details", nullable = false)
+    @Column(name = "product_details", nullable = false, columnDefinition = "text")
     private String productDetails;
 
     @Column(name = "total_price", nullable = false, precision = 12, scale = 2)
