@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" role="img" aria-label="Bao gạo">
+  <rect width="96" height="96" rx="20" fill="#f4f0e8"/>
+  <path d="M28 22h40l8 16v34c0 6.6-5.4 12-12 12H32c-6.6 0-12-5.4-12-12V38l8-16z" fill="#ffffff" stroke="#2f5d50" stroke-width="4" stroke-linejoin="round"/>
+  <path d="M28 22h40l-6 16H34l-6-16z" fill="#d7efe4" stroke="#2f5d50" stroke-width="4" stroke-linejoin="round"/>
+  <path d="M36 53c8-14 20-14 28 0-8 14-20 14-28 0z" fill="#f0c55a"/>
+  <path d="M44 52c2-5 6-8 12-9" fill="none" stroke="#9a6b14" stroke-width="3" stroke-linecap="round"/>
+  <path d="M35 67h26" fill="none" stroke="#2f5d50" stroke-width="4" stroke-linecap="round"/>
+</svg>
