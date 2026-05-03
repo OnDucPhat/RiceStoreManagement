@@ -8,6 +8,8 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
       - uses: actions/checkout@v4
 
@@ -27,8 +29,10 @@ jobs:
           VPS_USER: ${{ secrets.VPS_USER }}
           VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
         run: |
+          mkdir -p ~/.ssh
           echo "$VPS_SSH_KEY" | tr -d '\r' > ~/.ssh/vps_key
           chmod 600 ~/.ssh/vps_key
+          ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 -i ~/.ssh/vps_key $VPS_USER@$VPS_HOST 'echo "SSH OK"'
           ssh -o StrictHostKeyChecking=no -i ~/.ssh/vps_key $VPS_USER@$VPS_HOST << 'EOF'
             set -e
             cd /opt/ricestore
