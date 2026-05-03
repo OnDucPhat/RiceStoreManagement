@@ -1,5 +1,8 @@
 # Maven
 /target/
+.maven-home/
+.maven-verify/
+.maven-check/
 *.log
 *.class
 *.jar
@@ -10,6 +13,10 @@ hs_err_pid*
 # Gradle (if introduced later)
 .gradle/
 build/
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
 
 # IDEs
 .idea/
