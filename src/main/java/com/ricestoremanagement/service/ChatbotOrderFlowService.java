@@ -669,8 +669,12 @@ public class ChatbotOrderFlowService {
             riceType = chooseNewValue(riceType, result.getRiceType());
             quantity = chooseNewValue(quantity, result.getQuantity());
             address = chooseNewValue(address, result.getAddress());
-            customerPhone = chooseNewValue(customerPhone, result.getCustomerPhone());
             customerName = chooseNewValue(customerName, result.getCustomerName());
+            // Don't overwrite customerPhone when we're collecting loyalty phone —
+            // the phone in the user's message belongs to loyalty, not contact.
+            if (!loyaltyPhoneAsked || isLoyaltyPhoneCollected()) {
+                customerPhone = chooseNewValue(customerPhone, result.getCustomerPhone());
+            }
 
             // If waiting for customer name and AI didn't extract it, try raw text fallback
             if (customerNameAsked && !isNotBlank(customerName) && rawText != null) {
