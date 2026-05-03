@@ -173,17 +173,33 @@ public class ChatbotOrderFlowService {
 
         // Order is complete – before asking for more items, check if loyalty phone is needed
         if (!draft.isLoyaltyPhoneCollected()) {
-            pendingOrderDrafts.put(conversationKey, draft);
-            String loyaltyPhoneGuess = extractPhone(normalizedText);
-            if (loyaltyPhoneGuess != null && !loyaltyPhoneGuess.isBlank()) {
-                draft.setLoyaltyPhone(loyaltyPhoneGuess);
-            }
-            if (!draft.isLoyaltyPhoneCollected()) {
+            if (!draft.loyaltyPhoneAsked) {
+                // First time - ask for loyalty phone
+                draft.loyaltyPhoneAsked = true;
+                pendingOrderDrafts.put(conversationKey, draft);
                 String reply = buildLoyaltyPhoneRequest(draft);
                 log.info("Chatbot timing message_total durationMs={} outcome=awaiting_loyalty_phone",
                         elapsedMs(messageStartNs));
                 return replyAndRemember(safeConversationId, conversationKey, text, reply,
                         null, false, "awaiting_loyalty_phone");
+            } else {
+                // Already asked - extract from current message
+                String loyaltyPhoneGuess = extractPhone(normalizedText);
+                if (loyaltyPhoneGuess != null && !loyaltyPhoneGuess.isBlank()) {
+                    draft.setLoyaltyPhone(loyaltyPhoneGuess);
+                } else if (isBopQua(normalizedText)) {
+                    draft.setLoyaltyPhone("");
+                }
+                pendingOrderDrafts.put(conversationKey, draft);
+
+                if (!draft.isLoyaltyPhoneCollected()) {
+                    // Still not collected - ask again
+                    String reply = buildLoyaltyPhoneRequest(draft);
+                    log.info("Chatbot timing message_total durationMs={} outcome=awaiting_loyalty_phone_retry",
+                            elapsedMs(messageStartNs));
+                    return replyAndRemember(safeConversationId, conversationKey, text, reply,
+                            null, false, "awaiting_loyalty_phone_retry");
+                }
             }
         }
 
@@ -623,6 +639,16 @@ public class ChatbotOrderFlowService {
         return value != null && !value.trim().isEmpty();
     }
 
+    private static boolean isBopQua(String text) {
+        if (text == null) {
+            return false;
+        }
+        String norm = text.trim().toLowerCase();
+        return norm.equals("bo qua") || norm.equals("bỏ qua") || norm.equals("skip")
+                || norm.equals("khong") || norm.equals("không") || norm.equals("ko")
+                || norm.equals("k") || norm.equals("no");
+    }
+
     private static class PendingChatOrder {
         private String riceType;
         private String quantity;
@@ -723,13 +749,6 @@ public class ChatbotOrderFlowService {
 
         private String getLoyaltyPhone() {
             return loyaltyPhone;
-        }
-
-        private boolean isBopQua(String text) {
-            String norm = text.trim().toLowerCase();
-            return norm.equals("bo qua") || norm.equals("bỏ qua") || norm.equals("skip")
-                    || norm.equals("khong") || norm.equals("không") || norm.equals("ko")
-                    || norm.equals("k") || norm.equals("no");
         }
 
         private void prepareForAdditionalItem() {
