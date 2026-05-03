@@ -16,6 +16,9 @@ public class AiChatbotResult {
     @JsonProperty("customer_phone")
     private String customerPhone;
 
+    @JsonProperty("customer_name")
+    private String customerName;
+
     private String reply;
 
     public AiChatbotResult() {
@@ -89,5 +92,13 @@ public class AiChatbotResult {
 
     public void setReply(String reply) {
         this.reply = reply;
+    }
+
+    public String getCustomerName() {
+        return customerName;
+    }
+
+    public void setCustomerName(String customerName) {
+        this.customerName = customerName;
     }
 }

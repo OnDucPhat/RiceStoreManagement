@@ -159,6 +159,11 @@ public class ChatbotOrderFlowService {
         }
 
         if (!draft.isComplete()) {
+            // Mark that we're asking for customer name if it's missing
+            if (!isNotBlank(draft.customerName)) {
+                draft.customerNameAsked = true;
+                pendingOrderDrafts.put(conversationKey, draft);
+            }
             String reply = buildMissingInfoMessage(draft);
             log.info("Chatbot timing message_total durationMs={} outcome=incomplete_order",
                     elapsedMs(messageStartNs));
@@ -210,7 +215,11 @@ public class ChatbotOrderFlowService {
         AiParsedOrder parsed = draft.toParsedOrder();
         OrderPricing pricing = priceOrder(draft, activeProducts);
         Order order = new Order();
-        order.setCustomerName(customerName);
+        // Use customerName from draft if available, otherwise use the provided customerName
+        String finalCustomerName = (draft.customerName != null && !draft.customerName.trim().isEmpty())
+                ? draft.customerName.trim()
+                : customerName;
+        order.setCustomerName(finalCustomerName);
         order.setCustomerPhone(parsed.getCustomerPhone());
         order.setAddress(parsed.getAddress());
         order.setProductDetails(buildProductDetailsJson(draft, pricing));
@@ -413,6 +422,51 @@ public class ChatbotOrderFlowService {
         return m.find() ? m.group() : null;
     }
 
+    private static String extractCustomerName(String rawText) {
+        if (rawText == null || rawText.trim().isEmpty()) {
+            return null;
+        }
+        String text = rawText.trim();
+
+        // Remove common prefixes (case insensitive)
+        text = text.replaceAll("(?i)^(tôi tên là|tên tôi là|tôi tên|tên tôi|mình tên|tên mình|tên là|tên)\\s+", "");
+        text = text.replaceAll("(?i)^(anh|chị|em)\\s+", "");
+
+        // Extract first 1-3 words as name (Vietnamese names are typically 2-4 words)
+        String[] words = text.split("\\s+");
+        if (words.length == 0) {
+            return null;
+        }
+
+        // Take up to 3 words, but stop at common location/address indicators
+        StringBuilder name = new StringBuilder();
+        int wordCount = 0;
+        for (String word : words) {
+            if (wordCount >= 3) break;
+            // Stop if we hit location/address keywords
+            if (word.matches("(?i)(ở|tại|địa|chỉ|đường|phường|quận|huyện|tỉnh|thành|phố|cần|giuộc|đốc|cầu).*")) {
+                break;
+            }
+            // Stop if we hit phone number
+            if (word.matches("0\\d{9,10}")) {
+                break;
+            }
+            // Stop if we hit common words that indicate end of name
+            if (word.matches("(?i)(nhé|ạ|à|nha|nhá)")) {
+                break;
+            }
+            if (name.length() > 0) {
+                name.append(" ");
+            }
+            name.append(word);
+            wordCount++;
+        }
+
+        String result = name.toString().trim();
+        // Only return if we got something reasonable (2-50 chars)
+        return (result.length() >= 2 && result.length() <= 50) ? result : null;
+    }
+
     private String conversationContextFor(String conversationKey) {
         long now = System.currentTimeMillis();
         pruneConversationMemories(now);
@@ -454,7 +508,8 @@ public class ChatbotOrderFlowService {
         return isNotBlank(result.getRiceType())
                 || isNotBlank(result.getQuantity())
                 || isNotBlank(result.getAddress())
-                || isNotBlank(result.getCustomerPhone());
+                || isNotBlank(result.getCustomerPhone())
+                || isNotBlank(result.getCustomerName());
     }
 
     private boolean hasAnyOrderItemField(AiChatbotResult result) {
@@ -474,6 +529,9 @@ public class ChatbotOrderFlowService {
         }
         if (!isNotBlank(draft.customerPhone)) {
             missingFields.add("số điện thoại");
+        }
+        if (!isNotBlank(draft.customerName)) {
+            missingFields.add("tên của bạn");
         }
         return "Mình đã ghi nhận thông tin hiện có. Bạn cho mình xin thêm "
                 + joinVietnamese(missingFields)
@@ -570,8 +628,10 @@ public class ChatbotOrderFlowService {
         private String quantity;
         private String address;
         private String customerPhone;
+        private String customerName;
         private String loyaltyPhone;
         private boolean loyaltyPhoneAsked;
+        private boolean customerNameAsked;
         private boolean awaitingMoreItems;
         private boolean awaitingConfirmKeyword;
         private boolean addingAdditionalItem;
@@ -584,6 +644,17 @@ public class ChatbotOrderFlowService {
             quantity = chooseNewValue(quantity, result.getQuantity());
             address = chooseNewValue(address, result.getAddress());
             customerPhone = chooseNewValue(customerPhone, result.getCustomerPhone());
+            customerName = chooseNewValue(customerName, result.getCustomerName());
+
+            // If waiting for customer name and AI didn't extract it, try raw text fallback
+            if (customerNameAsked && !isNotBlank(customerName) && rawText != null) {
+                String extractedName = extractCustomerName(rawText);
+                if (extractedName != null && !extractedName.isEmpty()) {
+                    customerName = extractedName;
+                    customerNameAsked = false; // Mark as collected
+                }
+            }
+
             // If waiting for loyalty phone and no phone extracted from AI, try raw text
             if (loyaltyPhoneAsked && !isLoyaltyPhoneCollected()) {
                 String raw = rawText != null ? rawText.replaceAll("\\s+", "") : "";
@@ -610,7 +681,8 @@ public class ChatbotOrderFlowService {
             return isNotBlank(riceType)
                     && isNotBlank(quantity)
                     && isNotBlank(address)
-                    && isNotBlank(customerPhone);
+                    && isNotBlank(customerPhone)
+                    && isNotBlank(customerName);
         }
 
         private boolean isExpired(long now) {
