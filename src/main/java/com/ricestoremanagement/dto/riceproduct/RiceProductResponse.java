@@ -19,6 +19,9 @@ public class RiceProductResponse {
     @JsonProperty("profit_per_kg")
     private BigDecimal profitPerKg;
 
+    @JsonProperty("stock_kg")
+    private BigDecimal stockKg;
+
     private boolean active;
 
     @JsonProperty("created_at")
@@ -38,6 +41,7 @@ public class RiceProductResponse {
         response.setPricePerKg(product.getPricePerKg());
         response.setCostPerKg(product.getCostPerKg());
         response.setProfitPerKg(product.getProfitPerKg());
+        response.setStockKg(product.getStockKg());
         response.setActive(product.isActive());
         response.setCreatedAt(product.getCreatedAt());
         response.setUpdatedAt(product.getUpdatedAt());
@@ -84,17 +88,13 @@ public class RiceProductResponse {
         this.costPerKg = costPerKg;
     }
 
-    public BigDecimal getProfitPerKg() {
-        return profitPerKg;
-    }
+    public BigDecimal getProfitPerKg() { return profitPerKg; }
+    public void setProfitPerKg(BigDecimal profitPerKg) { this.profitPerKg = profitPerKg; }
 
-    public void setProfitPerKg(BigDecimal profitPerKg) {
-        this.profitPerKg = profitPerKg;
-    }
+    public BigDecimal getStockKg() { return stockKg; }
+    public void setStockKg(BigDecimal stockKg) { this.stockKg = stockKg; }
 
-    public boolean isActive() {
-        return active;
-    }
+    public boolean isActive() { return active; }
 
     public void setActive(boolean active) {
         this.active = active;

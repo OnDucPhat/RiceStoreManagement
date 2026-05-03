@@ -40,6 +40,7 @@ public class ChatbotOrderFlowService {
     private static final Pattern QUANTITY_TEXT_PATTERN = Pattern.compile(
             "\\b\\d+(?:[\\.,]\\d+)?\\s*(?:kg|kilogram|kilo|ky|ki|can|bao)\\b",
             Pattern.CASE_INSENSITIVE);
+    private static final Pattern PHONE_PATTERN = Pattern.compile("0\\d{9,10}");
 
     private final AiParsingService aiParsingService;
     private final OrderRepository orderRepository;
@@ -163,6 +164,22 @@ public class ChatbotOrderFlowService {
                     elapsedMs(messageStartNs));
             return replyAndRemember(safeConversationId, conversationKey, text, reply,
                     null, false, "incomplete_order");
+        }
+
+        // Order is complete – before asking for more items, check if loyalty phone is needed
+        if (!draft.isLoyaltyPhoneCollected()) {
+            pendingOrderDrafts.put(conversationKey, draft);
+            String loyaltyPhoneGuess = extractPhone(normalizedText);
+            if (loyaltyPhoneGuess != null && !loyaltyPhoneGuess.isBlank()) {
+                draft.setLoyaltyPhone(loyaltyPhoneGuess);
+            }
+            if (!draft.isLoyaltyPhoneCollected()) {
+                String reply = buildLoyaltyPhoneRequest(draft);
+                log.info("Chatbot timing message_total durationMs={} outcome=awaiting_loyalty_phone",
+                        elapsedMs(messageStartNs));
+                return replyAndRemember(safeConversationId, conversationKey, text, reply,
+                        null, false, "awaiting_loyalty_phone");
+            }
         }
 
         draft.markAwaitingMoreItems();
@@ -319,6 +336,9 @@ public class ChatbotOrderFlowService {
         details.put("quantity", parsed.getQuantity());
         details.put("address", parsed.getAddress());
         details.put("customer_phone", parsed.getCustomerPhone());
+        if (draft.getLoyaltyPhone() != null && !draft.getLoyaltyPhone().isBlank()) {
+            details.put("loyalty_phone", draft.getLoyaltyPhone());
+        }
         details.put("items", pricing.itemsForJson());
         details.put("total_price", pricing.totalPrice());
         details.put("raw_message", draft.rawText());
@@ -333,12 +353,16 @@ public class ChatbotOrderFlowService {
 
     private String buildConfirmationMessage(PendingChatOrder draft, Order order) {
         AiParsedOrder parsed = draft.toParsedOrder();
+        String loyaltyNote = (draft.getLoyaltyPhone() != null && !draft.getLoyaltyPhone().isBlank())
+                ? " SĐT tích điểm: " + draft.getLoyaltyPhone() + "."
+                : "";
         return String.format(
-                "Mình đã chốt đơn #%s gồm %s, giao đến %s. SĐT liên hệ: %s. Cửa hàng sẽ sớm xử lí cho bạn nhé.",
+                "Mình đã chốt đơn #%s gồm %s, giao đến %s. SĐT liên hệ: %s.%s Cửa hàng sẽ sớm xử lí cho bạn nhé.",
                 order.getId(),
                 draft.summaryForMessage(),
                 parsed.getAddress(),
-                parsed.getCustomerPhone());
+                parsed.getCustomerPhone(),
+                loyaltyNote);
     }
 
     private String buildMoreItemsQuestionMessage(PendingChatOrder draft) {
@@ -377,6 +401,16 @@ public class ChatbotOrderFlowService {
 
     private String fallbackReply() {
         return "hiện tại hệ thống chập chờn hoặc đang gặp vấn đề, bạn có thể liên hệ sđt 0342504323 để được xử lí nhé";
+    }
+
+    private String buildLoyaltyPhoneRequest(PendingChatOrder draft) {
+        return "Mình đã ghi nhận đơn gồm " + draft.summaryForMessage() + ". "
+                + "Bạn có SĐT tích điểm không? Nếu có, bạn cho mình xin SĐT nhé (nhắn 'bỏ qua' nếu không muốn tích điểm).";
+    }
+
+    private String extractPhone(String normalizedText) {
+        Matcher m = PHONE_PATTERN.matcher(normalizedText.replaceAll("\\s+", ""));
+        return m.find() ? m.group() : null;
     }
 
     private String conversationContextFor(String conversationKey) {
@@ -536,6 +570,8 @@ public class ChatbotOrderFlowService {
         private String quantity;
         private String address;
         private String customerPhone;
+        private String loyaltyPhone;
+        private boolean loyaltyPhoneAsked;
         private boolean awaitingMoreItems;
         private boolean awaitingConfirmKeyword;
         private boolean addingAdditionalItem;
@@ -548,6 +584,17 @@ public class ChatbotOrderFlowService {
             quantity = chooseNewValue(quantity, result.getQuantity());
             address = chooseNewValue(address, result.getAddress());
             customerPhone = chooseNewValue(customerPhone, result.getCustomerPhone());
+            // If waiting for loyalty phone and no phone extracted from AI, try raw text
+            if (loyaltyPhoneAsked && !isLoyaltyPhoneCollected()) {
+                String raw = rawText != null ? rawText.replaceAll("\\s+", "") : "";
+                Matcher m = PHONE_PATTERN.matcher(raw);
+                if (m.find()) {
+                    loyaltyPhone = m.group();
+                } else if (rawText != null && isBopQua(rawText)) {
+                    loyaltyPhone = "";
+                    loyaltyPhoneAsked = true;
+                }
+            }
             if (isNotBlank(riceType) && isNotBlank(quantity)) {
                 upsertCurrentItem();
             }
@@ -591,6 +638,26 @@ public class ChatbotOrderFlowService {
             awaitingConfirmKeyword = true;
             addingAdditionalItem = false;
             updatedAtMs = System.currentTimeMillis();
+        }
+
+        private boolean isLoyaltyPhoneCollected() {
+            return loyaltyPhoneAsked && (loyaltyPhone != null);
+        }
+
+        private void setLoyaltyPhone(String phone) {
+            this.loyaltyPhone = phone;
+            this.loyaltyPhoneAsked = true;
+        }
+
+        private String getLoyaltyPhone() {
+            return loyaltyPhone;
+        }
+
+        private boolean isBopQua(String text) {
+            String norm = text.trim().toLowerCase();
+            return norm.equals("bo qua") || norm.equals("bỏ qua") || norm.equals("skip")
+                    || norm.equals("khong") || norm.equals("không") || norm.equals("ko")
+                    || norm.equals("k") || norm.equals("no");
         }
 
         private void prepareForAdditionalItem() {

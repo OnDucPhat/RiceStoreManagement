@@ -3,6 +3,7 @@ package com.ricestoremanagement.controller;
 import com.ricestoremanagement.dto.order.OrderAssignShipperRequest;
 import com.ricestoremanagement.dto.order.OrderCreateRequest;
 import com.ricestoremanagement.dto.order.OrderResponse;
+import com.ricestoremanagement.dto.order.RetailOrderRequest;
 import com.ricestoremanagement.model.Order;
 import com.ricestoremanagement.model.enums.OrderStatus;
 import com.ricestoremanagement.service.OrderService;
@@ -47,5 +48,11 @@ public class OrderController {
             @Valid @RequestBody OrderAssignShipperRequest request) {
         Order order = orderService.assignShipper(id, request.getShipperId());
         return ResponseEntity.ok(OrderResponse.from(order));
+    }
+
+    @PostMapping("/retail")
+    public ResponseEntity<OrderResponse> createRetailOrder(@Valid @RequestBody RetailOrderRequest request) {
+        Order order = orderService.createRetailOrder(request);
+        return ResponseEntity.status(HttpStatus.CREATED).body(OrderResponse.from(order));
     }
 }

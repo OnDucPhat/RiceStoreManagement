@@ -30,6 +30,9 @@ public class RiceProduct {
     @Column(name = "cost_per_kg", nullable = false, precision = 12, scale = 2)
     private BigDecimal costPerKg;
 
+    @Column(name = "stock_kg", nullable = false, precision = 12, scale = 2)
+    private BigDecimal stockKg = BigDecimal.ZERO;
+
     @Column(nullable = false)
     private boolean active = true;
 
@@ -99,6 +102,14 @@ public class RiceProduct {
 
     public void setCostPerKg(BigDecimal costPerKg) {
         this.costPerKg = costPerKg;
+    }
+
+    public BigDecimal getStockKg() {
+        return stockKg != null ? stockKg : BigDecimal.ZERO;
+    }
+
+    public void setStockKg(BigDecimal stockKg) {
+        this.stockKg = stockKg;
     }
 
     public boolean isActive() {
