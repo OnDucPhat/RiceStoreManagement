@@ -14,48 +14,48 @@ import org.springframework.stereotype.Component;
 public class RiceProductSeeder implements ApplicationRunner {
     private static final List<SeedRiceProduct> DEFAULT_PRODUCTS = List.of(
             new SeedRiceProduct(
-                    "Gao Tai Nguyen",
-                    "Com no xop, mem, thom nhe, rao com; hop khach thich com kho, com chien hoac an voi canh.",
+                    "Gạo Tài Nguyên",
+                    "Cơm nở xốp, mềm, thơm nhẹ, ráo cơm; hợp khách thích cơm khô, cơm chiên hoặc ăn với canh.",
                     "20000",
                     "3000"),
             new SeedRiceProduct(
-                    "Gao ST25",
-                    "Hat dai, trang trong, thom nhe kieu la dua/com non; com deo mem, ngot, de nguoi van ngon.",
+                    "Gạo ST25",
+                    "Hạt dài, trắng trong, thơm nhẹ kiểu lá dứa/cơm non; cơm dẻo mềm, ngọt, dễ người ăn ngon.",
                     "25000",
                     "5000"),
             new SeedRiceProduct(
-                    "Gao ST24",
-                    "Hat thon dai, trang trong, thom la dua; com mem deo, ngot nhe, hop bua com gia dinh.",
+                    "Gạo ST24",
+                    "Hạt thon dài, trắng trong, thơm lá dứa; cơm mềm dẻo, ngọt nhẹ, hợp bữa cơm gia đình.",
                     "20000",
                     "2000"),
             new SeedRiceProduct(
-                    "Gao Nang Hoa Go Cong",
-                    "Hat hoi to va dai, thom nhe, com deo mem, ngot com; hop khach thich gao thom mien Tay.",
+                    "Gạo Nàng Hồng Gò Công",
+                    "Hạt hơi to và dài, thơm nhẹ, cơm dẻo mềm, ngọt cơm; hợp khách thích gạo thơm miền Tây.",
                     "17500",
                     "2000"),
             new SeedRiceProduct(
-                    "Gao Thai Sua",
-                    "Hat trang duc, thon dai, thom diu; com mem deo, ngot nhe, de nguoi van mem.",
+                    "Gạo Thái Sữa",
+                    "Hạt trắng đục, thon dài, thơm dịu; cơm mềm dẻo, ngọt nhẹ, dễ người ăn mềm.",
                     "20000",
                     "2000"),
             new SeedRiceProduct(
-                    "Gao Thom Lai",
-                    "Deo mem, thom nhe, vi ngot thanh; de an hang ngay, hop khach thich com thom nhung khong qua dinh.",
+                    "Gạo Thơm Lại",
+                    "Dẻo mềm, thơm nhẹ, vị ngọt thanh; dễ ăn hàng ngày, hợp khách thích cơm thơm nhưng không quá đặc.",
                     "16000",
                     "2000"),
             new SeedRiceProduct(
-                    "Gao Thom Thai",
-                    "Hat trang deu, thom tu nhien; com mem deo, vi ngot nhe, hop khach thich gao deo de an.",
+                    "Gạo Thơm Thái",
+                    "Hạt trắng đều, thơm tự nhiên; cơm mềm dẻo, vị ngọt nhẹ, hợp khách thích gạo dẻo dễ ăn.",
                     "16000",
                     "2000"),
             new SeedRiceProduct(
-                    "Gao No",
-                    "Com no to, toi xop, mem va it dinh; hop quan com, com chien hoac khach thich com rao.",
+                    "Gạo Nổ",
+                    "Cơm nở tơi, xốp, mềm và ít dính; hợp quán cơm, cơm chiên hoặc khách thích cơm ráo.",
                     "13000",
                     "2000"),
             new SeedRiceProduct(
-                    "Gao Sa Ri",
-                    "Hat nho, hoi duc, kho tay; com no xop, mem, toi hat, hop com chien, banh xeo, bun va bep an.",
+                    "Gạo Sa Ri",
+                    "Hạt nhỏ, hơi dục, khô tay; cơm nở xốp, mềm, tơi hạt, hợp cơm chiên, bánh xèo, bún và bẹp ăn.",
                     "15000",
                     "2000"));
 

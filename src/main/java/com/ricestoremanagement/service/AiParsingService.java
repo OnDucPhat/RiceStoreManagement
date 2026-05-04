@@ -330,7 +330,6 @@ public class AiParsingService {
         return riceCatalog.stream()
                 .map(product -> "- " + product.getName()
                         + ": price_per_kg=" + product.getPricePerKg()
-                        + ", profit_per_kg=" + product.getProfitPerKg()
                         + ", characteristics=" + product.getCharacteristics())
                 .collect(Collectors.joining("\n"));
     }
