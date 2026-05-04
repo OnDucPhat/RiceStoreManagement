@@ -2,7 +2,7 @@ name: Deploy to VPS
 
 on:
   push:
-    branches: [main]
+    branches: [master]
   workflow_dispatch:
 
 jobs:
@@ -36,7 +36,7 @@ jobs:
           ssh -o StrictHostKeyChecking=no -i ~/.ssh/vps_key $VPS_USER@$VPS_HOST << 'EOF'
             set -e
             cd /opt/ricestore
-            git pull origin main
+            git pull origin master
             chmod +x mvnw && ./mvnw clean package -DskipTests -q
             sudo systemctl restart ricestore
           EOF
