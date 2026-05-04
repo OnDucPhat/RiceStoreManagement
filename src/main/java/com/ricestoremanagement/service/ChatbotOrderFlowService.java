@@ -643,9 +643,16 @@ public class ChatbotOrderFlowService {
         if (text == null) {
             return false;
         }
-        String norm = text.trim().toLowerCase();
-        return norm.equals("bo qua") || norm.equals("bỏ qua") || norm.equals("skip")
-                || norm.equals("khong") || norm.equals("không") || norm.equals("ko")
+        String norm = Normalizer.normalize(text.trim(), Normalizer.Form.NFD)
+                .replaceAll("\\p{M}", "")
+                .replace('đ', 'd')
+                .replace('Đ', 'D')
+                .toLowerCase(Locale.ROOT)
+                .replaceAll("[^a-z0-9\\s]", " ")
+                .replaceAll("\\s+", " ")
+                .trim();
+        return norm.equals("bo qua") || norm.equals("skip")
+                || norm.equals("khong") || norm.equals("ko")
                 || norm.equals("k") || norm.equals("no");
     }
 
