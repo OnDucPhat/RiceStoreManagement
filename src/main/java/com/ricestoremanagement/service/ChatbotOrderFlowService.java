@@ -393,7 +393,7 @@ public class ChatbotOrderFlowService {
     private String buildMoreItemsQuestionMessage(PendingChatOrder draft) {
         AiParsedOrder parsed = draft.toParsedOrder();
         return String.format(
-                "Mình đã ghi nhận đơn gồm %s, giao đến %s. SĐT liên hệ: %s. Bạn có muốn đặt thêm gì nữa không?",
+                "Mình đã ghi nhận đơn gồm %s, giao đến %s. SĐT liên hệ: %s. Bạn có muốn đặt thêm gì nữa không, nếu không thì nhắn \"xác nhận\" để mình đưa đơn lên hệ thống nhé ?",
                 draft.summaryForMessage(),
                 parsed.getAddress(),
                 parsed.getCustomerPhone());
@@ -535,19 +535,19 @@ public class ChatbotOrderFlowService {
     private String buildMissingInfoMessage(PendingChatOrder draft) {
         List<String> missingFields = new ArrayList<>();
         if (!isNotBlank(draft.riceType)) {
-            missingFields.add("loại gạo");
+            missingFields.add("loại gạo(VD: gạo ST25)");
         }
         if (!isNotBlank(draft.quantity)) {
-            missingFields.add("số lượng");
+            missingFields.add("số lượng(VD: 2 bao, 10kg)");
         }
         if (!isNotBlank(draft.address)) {
-            missingFields.add("địa chỉ giao hàng");
+            missingFields.add("địa chỉ giao hàng(VD: 176 quốc 50, khu phố tân xuân, cần giuộc)");
         }
         if (!isNotBlank(draft.customerPhone)) {
-            missingFields.add("số điện thoại");
+            missingFields.add("số điện thoại(VD: 0123456789)");
         }
         if (!isNotBlank(draft.customerName)) {
-            missingFields.add("tên của bạn");
+            missingFields.add("tên của bạn(VD: Phát)");
         }
         return "Mình đã ghi nhận thông tin hiện có. Bạn cho mình xin thêm "
                 + joinVietnamese(missingFields)
