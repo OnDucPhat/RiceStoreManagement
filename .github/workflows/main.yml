@@ -18,7 +18,7 @@ jobs:
           cache: 'maven'
 
       - name: Build JAR
-        run: ./mvnw clean package -DskipTests -q
+        run: chmod +x mvnw && ./mvnw clean package -DskipTests -q
 
       - name: Deploy to VPS
         env:
@@ -32,7 +32,7 @@ jobs:
             set -e
             cd /opt/ricestore
             git pull origin main
-            ./mvnw clean package -DskipTests -q
+            chmod +x mvnw && ./mvnw clean package -DskipTests -q
             sudo systemctl restart ricestore
           EOF
 
