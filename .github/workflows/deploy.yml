@@ -36,7 +36,8 @@ jobs:
           ssh -o StrictHostKeyChecking=no -i ~/.ssh/vps_key $VPS_USER@$VPS_HOST << 'EOF'
             set -e
             cd /opt/ricestore
-            git pull origin master
+            git fetch origin
+            git reset --hard origin/master
             chmod +x mvnw && ./mvnw clean package -DskipTests -q
             sudo systemctl restart ricestore
           EOF
