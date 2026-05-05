@@ -35,7 +35,7 @@ public class ChatbotOrderFlowService {
     private static final Logger log = LoggerFactory.getLogger(ChatbotOrderFlowService.class);
     private static final long ORDER_DRAFT_TTL_MS = 30 * 60 * 1000;
     private static final long CONVERSATION_MEMORY_TTL_MS = 60 * 60 * 1000;
-    private static final int CONVERSATION_MEMORY_MAX_TURNS = 12;
+    private static final int CONVERSATION_MEMORY_MAX_TURNS = 36;
     private static final Pattern FIRST_NUMBER_PATTERN = Pattern.compile("(\\d+(?:[\\.,]\\d+)?)");
     private static final Pattern QUANTITY_TEXT_PATTERN = Pattern.compile(
             "\\b\\d+(?:[\\.,]\\d+)?\\s*(?:kg|kilogram|kilo|ky|ki|can|bao)\\b",
@@ -176,6 +176,8 @@ public class ChatbotOrderFlowService {
             if (isConfirmationMessage(normalizedText)) {
                 Order order = saveOrder(customerName, orderSource, existingDraft, activeProducts);
                 pendingOrderDrafts.remove(conversationKey);
+                conversationMemories.remove(conversationKey);
+
                 String reply = buildConfirmationMessage(existingDraft, order);
                 log.info("Chatbot timing message_total durationMs={} outcome=order_created",
                         elapsedMs(messageStartNs));
