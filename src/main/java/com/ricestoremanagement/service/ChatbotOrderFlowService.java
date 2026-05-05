@@ -205,6 +205,22 @@ public class ChatbotOrderFlowService {
             }
         }
 
+        // Short-circuit: if we're collecting loyalty phone and customer says skip,
+        // skip it before wasting an AI call
+        if (existingDraft != null
+                && existingDraft.loyaltyPhoneAsked
+                && !existingDraft.isLoyaltyPhoneCollected()
+                && isBopQua(normalizedText)) {
+            existingDraft.setLoyaltyPhone("");
+            pendingOrderDrafts.put(conversationKey, existingDraft);
+            existingDraft.markAwaitingMoreItems();
+            String reply = buildMoreItemsQuestionMessage(existingDraft);
+            log.info("Chatbot timing message_total durationMs={} outcome=loyalty_skipped",
+                    elapsedMs(messageStartNs));
+            return replyAndRemember(safeConversationId, conversationKey, text, reply,
+                    null, false, "loyalty_skipped");
+        }
+
         long aiStartNs = System.nanoTime();
         Optional<AiChatbotResult> resultOpt = aiParsingService.chat(text, activeProducts, conversationContext);
         log.info("Chatbot timing ai_total durationMs={} success={}",
@@ -864,7 +880,7 @@ public class ChatbotOrderFlowService {
         }
 
         private boolean isLoyaltyPhoneCollected() {
-            return loyaltyPhoneAsked && (loyaltyPhone != null);
+            return loyaltyPhoneAsked && loyaltyPhone != null && !loyaltyPhone.isEmpty();
         }
 
         private void setLoyaltyPhone(String phone) {
