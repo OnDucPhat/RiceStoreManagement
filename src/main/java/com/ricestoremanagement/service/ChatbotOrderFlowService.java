@@ -5,12 +5,15 @@ import java.math.RoundingMode;
 import java.text.Normalizer;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashSet;
 import java.util.Deque;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -536,6 +539,9 @@ public class ChatbotOrderFlowService {
         }
         String text = rawText.trim();
 
+        // Remove common greeting/opener prefixes first
+        text = text.replaceAll("(?i)^(ok\\s*cho|oke\\s*cho|vâng\\s*cho|dạ\\s*cho|có\\s*ạ\\s*cho)\\s*", "");
+
         // Remove common prefixes (case insensitive)
         text = text.replaceAll("(?i)^(tôi tên là|tên tôi là|tôi tên|tên tôi|mình tên|tên mình|tên là|tên)\\s+", "");
         text = text.replaceAll("(?i)^(anh|chị|em)\\s+", "");
@@ -546,11 +552,25 @@ public class ChatbotOrderFlowService {
             return null;
         }
 
+        // Function/filler words that should never be treated as names
+        Set<String> functionWords = new HashSet<>(Arrays.asList(
+                "ok", "oke", "ơi", "dạ", "vâng", "vâng_ạ", "có", "không",
+                "cho", "tôi", "mình", "tao", "tớ", "m", "mk",
+                "với", "của", "là", "vậy", "nha", "nhé", "ạ", "à", "nhá",
+                "thì", "để", "rồi", "đi", "muốn", "cần", "giao", "đặt",
+                "mua", "lấy", "bán", "cho", "xin", "nhờ"
+        ));
+
         // Take up to 3 words, but stop at common location/address indicators
         StringBuilder name = new StringBuilder();
         int wordCount = 0;
         for (String word : words) {
             if (wordCount >= 3) break;
+            String lower = word.toLowerCase();
+            // Skip function/filler words entirely
+            if (functionWords.contains(lower)) {
+                continue;
+            }
             // Stop if we hit location/address keywords
             if (word.matches("(?i)(ở|tại|địa|chỉ|đường|phường|quận|huyện|tỉnh|thành|phố|cần|giuộc|đốc|cầu).*")) {
                 break;
