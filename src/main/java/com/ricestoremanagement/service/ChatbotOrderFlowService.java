@@ -168,18 +168,20 @@ public class ChatbotOrderFlowService {
                     null, false, "awaiting_more_items");
         }
 
+        String conversationContext = conversationContextFor(conversationKey);
+
+        // Short-circuit: if customer says confirm/no-more while draft is pending,
+        // handle it before wasting an AI call
         if (existingDraft != null && existingDraft.isAwaitingConfirmation()) {
             if (isConfirmationMessage(normalizedText)) {
                 Order order = saveOrder(customerName, orderSource, existingDraft, activeProducts);
                 pendingOrderDrafts.remove(conversationKey);
-
                 String reply = buildConfirmationMessage(existingDraft, order);
                 log.info("Chatbot timing message_total durationMs={} outcome=order_created",
                         elapsedMs(messageStartNs));
                 return replyAndRemember(safeConversationId, conversationKey, text, reply,
                         order.getId(), true, "order_created");
             }
-
             if (isNoMoreItemsMessage(normalizedText)) {
                 existingDraft.markAwaitingConfirmKeyword();
                 String reply = buildConfirmInstructionMessage(existingDraft);
@@ -188,7 +190,6 @@ public class ChatbotOrderFlowService {
                 return replyAndRemember(safeConversationId, conversationKey, text, reply,
                         null, false, "awaiting_confirm_keyword");
             }
-
             if (isAddMoreAffirmationOnly(normalizedText)) {
                 existingDraft.prepareForAdditionalItem();
                 String reply = buildAdditionalItemDetailsRequest(existingDraft);
@@ -199,7 +200,6 @@ public class ChatbotOrderFlowService {
             }
         }
 
-        String conversationContext = conversationContextFor(conversationKey);
         long aiStartNs = System.nanoTime();
         Optional<AiChatbotResult> resultOpt = aiParsingService.chat(text, activeProducts, conversationContext);
         log.info("Chatbot timing ai_total durationMs={} success={}",
