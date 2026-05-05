@@ -184,7 +184,7 @@ public class ChatbotOrderFlowService {
                 String reply = buildConfirmationMessage(existingDraft, order);
                 log.info("Chatbot timing message_total durationMs={} outcome=order_created",
                         elapsedMs(messageStartNs));
-                return replyAndRemember(safeConversationId, conversationKey, text, reply,
+                return new ChatMessageResponse(safeConversationId, reply,
                         order.getId(), true, "order_created");
             }
             if (isNoMoreItemsMessage(normalizedText)) {
