@@ -78,6 +78,96 @@ public class ChatbotOrderFlowService {
                 activeProducts.size());
 
         PendingChatOrder existingDraft = getActiveOrderDraft(conversationKey);
+
+        // First turn: no conversation memory -> greet and ask for name
+        if (isFirstTurn(conversationKey) && existingDraft == null) {
+            PendingChatOrder draft = new PendingChatOrder();
+            draft.customerNameAsked = true;
+            pendingOrderDrafts.put(conversationKey, draft);
+            String reply = "Chào bạn, bạn cho mình xin tên trước nhé (VD: Phát)";
+            log.info("Chatbot timing message_total durationMs={} outcome=first_greeting",
+                    elapsedMs(messageStartNs));
+            return replyAndRemember(safeConversationId, conversationKey, text, reply,
+                    null, false, "first_greeting");
+        }
+
+        // Name collection: reply to name-asking prompt
+        if (existingDraft != null && existingDraft.customerNameAsked) {
+            String extractedName = extractCustomerName(text);
+            if (extractedName != null && !extractedName.isBlank()) {
+                existingDraft.customerName = extractedName.trim();
+            } else if (isBopQua(normalizedText) || normalizedText.isEmpty()) {
+                existingDraft.customerName = "Khach";
+            }
+            existingDraft.customerNameAsked = false;
+            pendingOrderDrafts.put(conversationKey, existingDraft);
+
+            // Proceed with AI parse for this message to collect remaining info
+            // (we'll skip name in missing info message since it's now collected)
+            String aiContext = conversationContextFor(conversationKey);
+            long aiStartNs = System.nanoTime();
+            Optional<AiChatbotResult> resultOpt = aiParsingService.chat(text, activeProducts, aiContext);
+            log.info("Chatbot timing ai_total durationMs={} success={}",
+                    elapsedMs(aiStartNs),
+                    resultOpt.isPresent());
+
+            if (resultOpt.isEmpty()) {
+                String reply = buildMissingInfoMessage(existingDraft);
+                log.info("Chatbot timing message_total durationMs={} outcome=name_collected_awaiting_rest",
+                        elapsedMs(messageStartNs));
+                return replyAndRemember(safeConversationId, conversationKey, text, reply,
+                        null, false, "name_collected_awaiting_rest");
+            }
+
+            AiChatbotResult result = resultOpt.get();
+            existingDraft.merge(result, text);
+            pendingOrderDrafts.put(conversationKey, existingDraft);
+
+            if (!existingDraft.isComplete()) {
+                String reply = buildMissingInfoMessage(existingDraft);
+                log.info("Chatbot timing message_total durationMs={} outcome=name_collected_incomplete",
+                        elapsedMs(messageStartNs));
+                return replyAndRemember(safeConversationId, conversationKey, text, reply,
+                        null, false, "name_collected_incomplete");
+            }
+
+            // Order complete, proceed with loyalty phone check
+            if (!existingDraft.isLoyaltyPhoneCollected()) {
+                if (!existingDraft.loyaltyPhoneAsked) {
+                    existingDraft.loyaltyPhoneAsked = true;
+                    pendingOrderDrafts.put(conversationKey, existingDraft);
+                    String reply = buildLoyaltyPhoneRequest(existingDraft);
+                    log.info("Chatbot timing message_total durationMs={} outcome=awaiting_loyalty_phone",
+                            elapsedMs(messageStartNs));
+                    return replyAndRemember(safeConversationId, conversationKey, text, reply,
+                            null, false, "awaiting_loyalty_phone");
+                } else {
+                    String loyaltyPhoneGuess = extractPhone(normalizedText);
+                    if (loyaltyPhoneGuess != null && !loyaltyPhoneGuess.isBlank()) {
+                        existingDraft.setLoyaltyPhone(loyaltyPhoneGuess);
+                    } else if (isBopQua(normalizedText)) {
+                        existingDraft.setLoyaltyPhone("");
+                    }
+                    pendingOrderDrafts.put(conversationKey, existingDraft);
+
+                    if (!existingDraft.isLoyaltyPhoneCollected()) {
+                        String reply = buildLoyaltyPhoneRequest(existingDraft);
+                        log.info("Chatbot timing message_total durationMs={} outcome=awaiting_loyalty_phone_retry",
+                                elapsedMs(messageStartNs));
+                        return replyAndRemember(safeConversationId, conversationKey, text, reply,
+                                null, false, "awaiting_loyalty_phone_retry");
+                    }
+                }
+            }
+
+            existingDraft.markAwaitingMoreItems();
+            String reply = buildMoreItemsQuestionMessage(existingDraft);
+            log.info("Chatbot timing message_total durationMs={} outcome=awaiting_more_items",
+                    elapsedMs(messageStartNs));
+            return replyAndRemember(safeConversationId, conversationKey, text, reply,
+                    null, false, "awaiting_more_items");
+        }
+
         if (existingDraft != null && existingDraft.isAwaitingConfirmation()) {
             if (isConfirmationMessage(normalizedText)) {
                 Order order = saveOrder(customerName, orderSource, existingDraft, activeProducts);
@@ -546,9 +636,6 @@ public class ChatbotOrderFlowService {
         if (!isNotBlank(draft.customerPhone)) {
             missingFields.add("số điện thoại(VD: 0123456789)");
         }
-        if (!isNotBlank(draft.customerName)) {
-            missingFields.add("tên của bạn(VD: Phát)");
-        }
         return "Mình đã ghi nhận thông tin hiện có. Bạn cho mình xin thêm "
                 + joinVietnamese(missingFields)
                 + " nhé.";
@@ -575,6 +662,11 @@ public class ChatbotOrderFlowService {
 
     private long elapsedMs(long startNs) {
         return (System.nanoTime() - startNs) / 1_000_000;
+    }
+
+    private boolean isFirstTurn(String conversationKey) {
+        ChatConversationMemory memory = conversationMemories.get(conversationKey);
+        return memory == null || memory.isEmpty();
     }
 
     private boolean isConfirmationMessage(String normalizedText) {
@@ -941,6 +1033,10 @@ public class ChatbotOrderFlowService {
                 index++;
             }
             return context.toString().trim();
+        }
+
+        private synchronized boolean isEmpty() {
+            return turns.isEmpty();
         }
 
         private boolean isExpired(long now) {
