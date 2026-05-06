@@ -20,8 +20,17 @@ public class AiChatbotResult {
     private String customerName;
 
     private String reply;
+    private String rawResponse;
 
     public AiChatbotResult() {
+    }
+
+    public static AiChatbotResult fromRawText(String rawText) {
+        AiChatbotResult result = new AiChatbotResult();
+        result.rawResponse = rawText;
+        result.intent = "GENERAL_CHAT";
+        result.reply = rawText;
+        return result;
     }
 
     public boolean isOrderIntent() {
@@ -100,5 +109,13 @@ public class AiChatbotResult {
 
     public void setCustomerName(String customerName) {
         this.customerName = customerName;
+    }
+
+    public String getRawResponse() {
+        return rawResponse;
+    }
+
+    public void setRawResponse(String rawResponse) {
+        this.rawResponse = rawResponse;
     }
 }

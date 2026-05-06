@@ -103,12 +103,12 @@ public class AiParsingService {
         long startNs = System.nanoTime();
         Optional<AiChatbotResult> result;
         if ("gemini".equalsIgnoreCase(provider)) {
-            result = chatWithGemini(messageText, riceCatalog, conversationContext);
+            result = chatWithRetry(() -> chatWithGemini(messageText, riceCatalog, conversationContext));
         } else {
             if (!"openai".equalsIgnoreCase(provider)) {
                 log.warn("Unknown ai.provider value '{}'; falling back to OpenAI", provider);
             }
-            result = chatWithOpenAi(messageText, riceCatalog, conversationContext);
+            result = chatWithRetry(() -> chatWithOpenAi(messageText, riceCatalog, conversationContext));
         }
         log.info("Messenger timing ai_provider={} durationMs={} success={}",
                 provider,
@@ -117,8 +117,57 @@ public class AiParsingService {
         return result;
     }
 
+    private Optional<AiChatbotResult> chatWithRetry(java.util.function.Supplier<Optional<AiChatbotResult>> attemptSupplier) {
+        int[] delays = {500, 1000};
+        AiParsingException lastFailure = null;
+        for (int i = 0; i <= delays.length; i++) {
+            try {
+                Optional<AiChatbotResult> result = attemptSupplier.get();
+                if (result.isPresent()) {
+                    return result;
+                }
+                if (i < delays.length) {
+                    try {
+                        Thread.sleep(delays[i]);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        break;
+                    }
+                }
+            } catch (AiParsingException ex) {
+                lastFailure = ex;
+                if (i < delays.length) {
+                    try {
+                        Thread.sleep(delays[i]);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        break;
+                    }
+                }
+            }
+        }
+        if (lastFailure != null && lastFailure.getRawContent() != null) {
+            log.warn("AI parsing failed after retries, raw response: {}", snippet(lastFailure.getRawContent()));
+            return Optional.of(AiChatbotResult.fromRawText(lastFailure.getRawContent()));
+        }
+        return Optional.empty();
+    }
+
     public Optional<AiParsedOrder> parseOrder(String messageText) {
         return chat(messageText).map(this::toParsedOrder);
+    }
+
+    private static class AiParsingException extends RuntimeException {
+        private final String rawContent;
+
+        AiParsingException(String message, String rawContent) {
+            super(message);
+            this.rawContent = rawContent;
+        }
+
+        String getRawContent() {
+            return rawContent;
+        }
     }
 
     private Optional<AiChatbotResult> chatWithOpenAi(
@@ -131,28 +180,31 @@ public class AiParsingService {
         }
 
         Map<String, Object> request = buildOpenAiRequest(messageText, riceCatalog, conversationContext);
+        String rawContent;
 
         try {
             AiChatCompletionResponse response = sendOpenAiRequest(request);
 
             if (response == null || response.getChoices() == null || response.getChoices().isEmpty()) {
-                log.warn("OpenAI parsing returned no choices");
-                return Optional.empty();
+                throw new AiParsingException("OpenAI returned no choices", null);
             }
 
             AiChatCompletionChoice choice = response.getChoices().get(0);
             if (choice == null || choice.getMessage() == null) {
-                log.warn("OpenAI parsing returned an empty message");
-                return Optional.empty();
+                throw new AiParsingException("OpenAI returned an empty message", null);
             }
-            String content = choice.getMessage().getContent();
-            return parseJson(content);
+            rawContent = choice.getMessage().getContent();
         } catch (HttpClientErrorException ex) {
-            return handleOpenAiHttpError(ex);
+            throw new AiParsingException("OpenAI HTTP error: " + ex.getStatusCode(), null);
         } catch (RestClientException ex) {
-            log.warn("OpenAI parsing request failed type={} message={}", ex.getClass().getSimpleName(), ex.getMessage());
-            return Optional.empty();
+            throw new AiParsingException("OpenAI request failed: " + ex.getMessage(), null);
         }
+
+        Optional<AiChatbotResult> parsed = parseJson(rawContent);
+        if (parsed.isEmpty() && rawContent != null) {
+            throw new AiParsingException("AI response JSON parse failed", rawContent);
+        }
+        return parsed;
     }
 
     private Optional<AiChatbotResult> chatWithGemini(
@@ -165,6 +217,7 @@ public class AiParsingService {
         }
 
         GeminiGenerateRequest request = buildGeminiRequest(messageText, riceCatalog, conversationContext);
+        String rawContent;
 
         try {
             GeminiGenerateResponse response = geminiClient.post()
@@ -178,22 +231,26 @@ public class AiParsingService {
                     .body(GeminiGenerateResponse.class);
 
             if (response == null || response.getCandidates() == null || response.getCandidates().isEmpty()) {
-                return Optional.empty();
+                throw new AiParsingException("Gemini returned no candidates", null);
             }
 
             GeminiCandidate candidate = response.getCandidates().get(0);
             if (candidate == null || candidate.getContent() == null
                     || candidate.getContent().getParts() == null
                     || candidate.getContent().getParts().isEmpty()) {
-                return Optional.empty();
+                throw new AiParsingException("Gemini returned an empty candidate", null);
             }
 
-            String content = candidate.getContent().getParts().get(0).getText();
-            return parseJson(content);
+            rawContent = candidate.getContent().getParts().get(0).getText();
         } catch (RestClientException ex) {
-            log.warn("Gemini parsing request failed: {}", ex.getMessage());
-            return Optional.empty();
+            throw new AiParsingException("Gemini request failed: " + ex.getMessage(), null);
         }
+
+        Optional<AiChatbotResult> parsed = parseJson(rawContent);
+        if (parsed.isEmpty() && rawContent != null) {
+            throw new AiParsingException("AI response JSON parse failed", rawContent);
+        }
+        return parsed;
     }
 
     private Map<String, Object> buildOpenAiRequest(
@@ -232,11 +289,6 @@ public class AiParsingService {
                 .build();
     }
 
-    private Optional<AiChatbotResult> handleOpenAiHttpError(HttpClientErrorException ex) {
-        log.warn("OpenAI parsing request failed: {} {}", ex.getStatusCode(), ex.getResponseBodyAsString());
-        return Optional.empty();
-    }
-
     private long elapsedMs(long startNs) {
         return (System.nanoTime() - startNs) / 1_000_000;
     }
@@ -269,8 +321,11 @@ public class AiParsingService {
             AiChatbotResult result = objectMapper.readValue(json, AiChatbotResult.class);
             return Optional.of(result);
         } catch (Exception ex) {
-            log.warn("Unable to parse AI response: {} contentSnippet={}", ex.getMessage(), snippet(content));
-            return Optional.empty();
+            log.warn("JSON parse failed: {} | jsonSnippet={} | rawSnippet={}",
+                    ex.getMessage(),
+                    snippet(json),
+                    snippet(content));
+            throw new AiParsingException("JSON parse failed: " + ex.getMessage(), content);
         }
     }
 
