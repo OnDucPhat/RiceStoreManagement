@@ -102,55 +102,28 @@ public class AiParsingService {
         }
         long startNs = System.nanoTime();
         Optional<AiChatbotResult> result;
-        if ("gemini".equalsIgnoreCase(provider)) {
-            result = chatWithRetry(() -> chatWithGemini(messageText, riceCatalog, conversationContext));
-        } else {
-            if (!"openai".equalsIgnoreCase(provider)) {
-                log.warn("Unknown ai.provider value '{}'; falling back to OpenAI", provider);
+        try {
+            if ("gemini".equalsIgnoreCase(provider)) {
+                result = chatWithGemini(messageText, riceCatalog, conversationContext);
+            } else {
+                if (!"openai".equalsIgnoreCase(provider)) {
+                    log.warn("Unknown ai.provider value '{}'; falling back to OpenAI", provider);
+                }
+                result = chatWithOpenAi(messageText, riceCatalog, conversationContext);
             }
-            result = chatWithRetry(() -> chatWithOpenAi(messageText, riceCatalog, conversationContext));
+        } catch (AiParsingException ex) {
+            if (ex.getRawContent() != null) {
+                log.warn("AI parsing failed, returning raw response: {}", snippet(ex.getRawContent()));
+                result = Optional.of(AiChatbotResult.fromRawText(ex.getRawContent()));
+            } else {
+                result = Optional.empty();
+            }
         }
         log.info("Messenger timing ai_provider={} durationMs={} success={}",
                 provider,
                 elapsedMs(startNs),
                 result.isPresent());
         return result;
-    }
-
-    private Optional<AiChatbotResult> chatWithRetry(java.util.function.Supplier<Optional<AiChatbotResult>> attemptSupplier) {
-        int[] delays = {500, 1000};
-        AiParsingException lastFailure = null;
-        for (int i = 0; i <= delays.length; i++) {
-            try {
-                Optional<AiChatbotResult> result = attemptSupplier.get();
-                if (result.isPresent()) {
-                    return result;
-                }
-                if (i < delays.length) {
-                    try {
-                        Thread.sleep(delays[i]);
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                        break;
-                    }
-                }
-            } catch (AiParsingException ex) {
-                lastFailure = ex;
-                if (i < delays.length) {
-                    try {
-                        Thread.sleep(delays[i]);
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                        break;
-                    }
-                }
-            }
-        }
-        if (lastFailure != null && lastFailure.getRawContent() != null) {
-            log.warn("AI parsing failed after retries, raw response: {}", snippet(lastFailure.getRawContent()));
-            return Optional.of(AiChatbotResult.fromRawText(lastFailure.getRawContent()));
-        }
-        return Optional.empty();
     }
 
     public Optional<AiParsedOrder> parseOrder(String messageText) {
