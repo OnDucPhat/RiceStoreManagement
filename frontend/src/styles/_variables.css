@@ -1,0 +1,49 @@
+:root {
+  color-scheme: light;
+  --bg: #f5f7f4;
+  --panel: #ffffff;
+  --panel-soft: #eef5ef;
+  --ink: #17221d;
+  --muted: #66736c;
+  --line: #d9e1dc;
+  --brand: #2f5d50;
+  --brand-strong: #244a40;
+  --accent: #b17925;
+  --success: #26764d;
+  --warning: #9a6417;
+  --danger: #b42318;
+  --info: #286080;
+  font-family: Inter, Arial, "Helvetica Neue", sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--ink);
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}

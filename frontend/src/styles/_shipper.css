@@ -1,0 +1,80 @@
+.shipper-shell {
+  min-height: 100vh;
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 16px;
+  display: grid;
+  gap: 14px;
+}
+
+.shipper-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.shipper-header h1 {
+  margin: 0;
+  font-size: 30px;
+}
+
+.shipper-header p {
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.shipper-control,
+.delivery-list,
+.handover-mobile {
+  display: grid;
+  gap: 12px;
+}
+
+.delivery-card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 16px;
+  display: grid;
+  gap: 10px;
+}
+
+.delivery-card h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.delivery-card p {
+  color: var(--muted);
+  line-height: 1.45;
+  margin: 0;
+}
+
+.handover-mobile {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.handover-mobile h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.handover-mobile p {
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.qr-large {
+  min-width: 160px;
+  min-height: 260px;
+  display: grid;
+  place-items: center;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  background: #ffffff;
+  color: var(--muted);
+}

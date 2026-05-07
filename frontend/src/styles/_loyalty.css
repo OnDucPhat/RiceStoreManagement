@@ -1,0 +1,63 @@
+.loyalty-card {
+  margin-top: 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 16px;
+  background: var(--panel-soft);
+  display: grid;
+  gap: 14px;
+}
+
+.loyalty-phone {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 18px;
+}
+
+.loyalty-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 10px;
+}
+
+.loyalty-stat {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: grid;
+  gap: 4px;
+}
+
+.loyalty-stat span {
+  color: var(--muted);
+  font-size: 12px;
+  text-transform: uppercase;
+  font-weight: 700;
+}
+
+.loyalty-stat small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.loyalty-points {
+  font-size: 22px;
+  color: var(--brand);
+}
+
+.gift-confirm {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 14px;
+  background: #fff5df;
+  display: grid;
+  gap: 10px;
+}
+
+.gift-confirm p {
+  margin: 0;
+  font-weight: 700;
+  color: var(--warning);
+}
